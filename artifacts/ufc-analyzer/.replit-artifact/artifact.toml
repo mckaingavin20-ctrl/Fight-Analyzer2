@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "UFC Card Analyzer"
+version = "1.0.0"
+id = "artifacts/ufc-analyzer"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18850
+
+[services.development]
+run = "pnpm --filter @workspace/ufc-analyzer run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/ufc-analyzer", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/ufc-analyzer/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18850"
+BASE_PATH = "/"
