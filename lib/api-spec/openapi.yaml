@@ -3,13 +3,17 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: UFC Card Analyzer API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: events
+    description: UFC event operations
+  - name: fights
+    description: UFC fight analysis operations
 paths:
   /healthz:
     get:
@@ -24,6 +28,93 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /events:
+    get:
+      operationId: listEvents
+      tags: [events]
+      summary: List upcoming UFC events
+      description: Returns upcoming UFC events scraped from UFCStats
+      responses:
+        "200":
+          description: List of upcoming events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UfcEvent"
+        "500":
+          description: Scraping error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /events/{eventId}/card:
+    get:
+      operationId: getEventCard
+      tags: [events]
+      summary: Get fight card for an event
+      description: Returns all fights on the card for the given event
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Fight card
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventCard"
+        "404":
+          description: Event not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Scraping error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /fights/{fightId}/analysis:
+    get:
+      operationId: getFightAnalysis
+      tags: [fights]
+      summary: Get deep analysis for a fight
+      description: Returns style breakdown, stats comparison, common opponents, odds, and AI pick
+      parameters:
+        - name: fightId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Full fight analysis
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FightAnalysis"
+        "404":
+          description: Fight not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Analysis error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +125,199 @@ components:
       required:
         - status
 
+    ApiError:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
+    UfcEvent:
+      type: object
+      required: [id, name, date]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        date:
+          type: string
+        venue:
+          type: ["string", "null"]
+        location:
+          type: ["string", "null"]
+
+    FightCard:
+      type: object
+      required: [id, weightClass, fighterA, fighterB]
+      properties:
+        id:
+          type: string
+        weightClass:
+          type: string
+        order:
+          type: integer
+        isMain:
+          type: boolean
+        fighterA:
+          $ref: "#/components/schemas/FighterSummary"
+        fighterB:
+          $ref: "#/components/schemas/FighterSummary"
+
+    FighterSummary:
+      type: object
+      required: [name, record]
+      properties:
+        name:
+          type: string
+        record:
+          type: string
+        ufcStatsId:
+          type: ["string", "null"]
+
+    EventCard:
+      type: object
+      required: [id, name, date, fights]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        date:
+          type: string
+        venue:
+          type: ["string", "null"]
+        location:
+          type: ["string", "null"]
+        fights:
+          type: array
+          items:
+            $ref: "#/components/schemas/FightCard"
+
+    FighterStats:
+      type: object
+      required: [name, record]
+      properties:
+        name:
+          type: string
+        record:
+          type: string
+        reach:
+          type: ["string", "null"]
+        height:
+          type: ["string", "null"]
+        age:
+          type: ["integer", "null"]
+        stance:
+          type: ["string", "null"]
+        style:
+          type: string
+        slpm:
+          type: ["number", "null"]
+        strAcc:
+          type: ["number", "null"]
+        strDef:
+          type: ["number", "null"]
+        tdAvg:
+          type: ["number", "null"]
+        tdAcc:
+          type: ["number", "null"]
+        tdDef:
+          type: ["number", "null"]
+        subAvg:
+          type: ["number", "null"]
+        recentForm:
+          type: array
+          items:
+            type: string
+        strengths:
+          type: array
+          items:
+            type: string
+        weaknesses:
+          type: array
+          items:
+            type: string
+
+    CommonOpponent:
+      type: object
+      required: [opponent, resultA, resultB]
+      properties:
+        opponent:
+          type: string
+        resultA:
+          type: string
+        resultB:
+          type: string
+        methodA:
+          type: ["string", "null"]
+        methodB:
+          type: ["string", "null"]
+
+    FightOdds:
+      type: object
+      required: [fighterA, fighterB]
+      properties:
+        fighterA:
+          type: string
+        fighterB:
+          type: string
+        book:
+          type: string
+
+    Lean:
+      type: object
+      required: [fighter, confidence, reasoning]
+      properties:
+        fighter:
+          type: string
+        confidence:
+          type: string
+          enum: [strong, lean, toss-up]
+        reasoning:
+          type: string
+        keyEdges:
+          type: array
+          items:
+            type: string
+        riskFactors:
+          type: array
+          items:
+            type: string
+
+    FightAnalysis:
+      type: object
+      required: [fightId, fighterA, fighterB, lean]
+      properties:
+        fightId:
+          type: string
+        weightClass:
+          type: string
+        fighterA:
+          $ref: "#/components/schemas/FighterStats"
+        fighterB:
+          $ref: "#/components/schemas/FighterStats"
+        commonOpponents:
+          type: array
+          items:
+            $ref: "#/components/schemas/CommonOpponent"
+        odds:
+          oneOf:
+            - $ref: "#/components/schemas/FightOdds"
+            - type: "null"
+        lean:
+          $ref: "#/components/schemas/Lean"
+        sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/Source"
+
+    Source:
+      type: object
+      required: [label, url]
+      properties:
+        label:
+          type: string
+        url:
+          type: string
