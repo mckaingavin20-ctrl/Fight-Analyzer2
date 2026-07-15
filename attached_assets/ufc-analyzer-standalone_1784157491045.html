@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UFC Card Analyzer</title>
+<style>
+  :root{
+    --ink:#181614; --paper:#f6f4ef; --card:#ffffff; --line:#e2ddd1;
+    --muted:#847d6c; --accent:#a3271f; --accent-bg:#f3ddd9;
+    --win:#2f6b41; --win-bg:#e2ede3;
+    --lean:#8a6d1f; --lean-bg:#f2e8cc;
+    --toss:#5b5748; --toss-bg:#eeeae1;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --ink:#ece7db; --paper:#17140f; --card:#211c15; --line:#382f22;
+      --muted:#a89e88; --accent:#e0766d; --accent-bg:#3a1f1c;
+      --win:#8fc9a0; --win-bg:#1f3324;
+      --lean:#e0c264; --lean-bg:#3a3016;
+      --toss:#b3ab97; --toss-bg:#2b271f;
+    }
+  }
+  *{box-sizing:border-box;}
+  body{
+    background:var(--paper); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    margin:0; padding:24px 16px 60px; max-width:820px; margin-inline:auto;
+  }
+  h1{font-family:Georgia,"Times New Roman",serif; font-weight:600; font-size:26px; margin:0 0 2px;}
+  .sub{color:var(--muted); font-size:13.5px; margin:0 0 18px; line-height:1.5;}
+  .disclaimer{
+    background:var(--accent-bg); border-left:3px solid var(--accent);
+    padding:10px 14px; font-size:12.5px; color:var(--ink); border-radius:4px; margin-bottom:20px; line-height:1.55;
+  }
+  .toolbar{display:flex; gap:10px; margin-bottom:18px; flex-wrap:wrap; align-items:center;}
+  button.primary{
+    background:var(--ink); color:var(--paper); border:none; border-radius:6px; padding:10px 18px;
+    font-size:13.5px; font-weight:600; cursor:pointer;
+  }
+  button.primary:disabled{opacity:.5; cursor:default;}
+  button.ghost{
+    background:transparent; border:1px solid var(--line); color:var(--ink); border-radius:6px;
+    padding:9px 16px; font-size:13px; cursor:pointer;
+  }
+  select{
+    background:var(--card); border:1px solid var(--line); border-radius:6px; color:var(--ink);
+    padding:9px 12px; font-size:13.5px;
+  }
+  .status-line{font-size:12.5px; color:var(--muted); margin-bottom:16px; min-height:16px;}
+  .event-card{background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:18px;}
+  .event-card h2{font-family:Georgia,serif; font-size:18px; margin:0 0 2px;}
+  .event-meta{color:var(--muted); font-size:12.5px; margin-bottom:14px;}
+  .fight{border:1px solid var(--line); border-radius:8px; padding:14px 16px; margin-bottom:12px;}
+  .fight-header{display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:6px;}
+  .matchup{font-weight:700; font-size:15px;}
+  .weight{color:var(--muted); font-size:12px;}
+  .conf-badge{
+    display:inline-block; font-size:11px; font-weight:700; padding:3px 9px; border-radius:12px; margin-left:6px;
+  }
+  .conf-badge.lean{background:var(--lean-bg); color:var(--lean);}
+  .conf-badge.toss{background:var(--toss-bg); color:var(--toss);}
+  .conf-badge.strong{background:var(--win-bg); color:var(--win);}
+  .fight-body{font-size:13px; color:var(--ink); margin-top:10px; line-height:1.6;}
+  .fight-body h4{font-size:12.5px; margin:10px 0 3px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:.03em;}
+  .empty{color:var(--muted); font-size:13.5px; text-align:center; padding:50px 10px; line-height:1.6;}
+  .odds{font-family:"SF Mono",Consolas,monospace; font-size:12px; background:var(--paper); padding:1px 6px; border-radius:4px; border:1px solid var(--line);}
+  .error-box{background:var(--accent-bg); border:1px solid var(--accent); border-radius:8px; padding:12px 14px; font-size:13px; margin-bottom:16px; display:none;}
+</style>
+</head>
+<body>
+
+<h1>UFC card analyzer</h1>
+<p class="sub">Style breakdowns, common-opponent results, recent form and odds — pulled live, sourced, no false confidence.</p>
+
+<div class="disclaimer">
+  MMA is one of the most upset-prone sports there is. Even strong style/record edges lose regularly. Nothing on this page is a guarantee — treat any "lock" claim, from this tool or anywhere else, with suspicion. Bet only what you can afford to lose.
+</div>
+
+<div class="toolbar">
+  <select id="event-select"><option value="">Loading events…</option></select>
+  <button class="primary" id="analyze-btn" disabled>Analyze card</button>
+  <button class="ghost" id="refresh-events-btn">Refresh events</button>
+</div>
+<div class="status-line" id="status-line"></div>
+<div class="error-box" id="error-box"></div>
+
+<div id="content">
+  <div class="empty">Select an upcoming event and hit "Analyze card" to pull fighter data, style comparisons, common opponents, and odds.</div>
+</div>
+
+<script>
+/* =====================================================================
+   BACKEND INTEGRATION POINTS — for Replit to implement
+   =====================================================================
+   This frontend expects a backend server (Node/Express, Flask, etc.)
+   running alongside this file, exposing the endpoints below. None of
+   this data can be reliably scraped client-side (CORS blocks direct
+   browser fetches to most of these sources, and several forbid
+   scraping in their ToS — check before building).
+
+   Recommended real data sources to wire up server-side:
+     - Fight cards / rosters: UFC.com (no official public API), or
+       Sportradar MMA API (paid, official, most reliable for
+       schedules/records) https://developer.sportradar.com/mma
+     - Fighter stats/records: UFC Stats (ufcstats.com) is scrapeable
+       and commonly used by the MMA analytics community, but has no
+       official API — respect robots.txt and rate limit.
+     - Odds: The Odds API (https://the-odds-api.com) has a real,
+       documented MMA/UFC odds endpoint with a free tier.
+     - Common-opponent / style analysis: no API exists for this —
+       it has to be computed server-side from the records/stats data
+       above (cross-reference each fighter's opponent list).
+
+   GET /api/events
+     -> [{ id, name, date, venue }]  upcoming events, soonest first
+
+   GET /api/events/:id/card
+     -> { id, name, date, venue, fights: [
+          { id, weightClass, fighterA: {name, record}, fighterB: {name, record} }
+        ]}
+
+   GET /api/fights/:id/analysis
+     -> {
+          fighterA: { name, record, recentForm: [...], style: string,
+                      reach, height, age },
+          fighterB: { ...same shape... },
+          commonOpponents: [{ opponent, resultA, resultB }],
+          odds: { fighterA: "-150", fighterB: "+130", book: "..." } | null,
+          lean: { fighter: string, confidence: "strong"|"lean"|"toss-up",
+                  reasoning: string },
+          sources: [{ label, url }]
+        }
+
+   Wire the three fetch calls below (loadEvents, loadCard, loadAnalysis)
+   to these endpoints once the backend exists. Right now they throw so
+   the UI fails loudly instead of showing fabricated data.
+   ===================================================================== */
+
+const API_BASE = ""; // e.g. "https://your-repl-name.repl.co"
+
+async function loadEvents(){
+  // return await (await fetch(`${API_BASE}/api/events`)).json();
+  throw new Error("loadEvents() not implemented — connect /api/events");
+}
+
+async function loadCard(eventId){
+  // return await (await fetch(`${API_BASE}/api/events/${eventId}/card`)).json();
+  throw new Error("loadCard() not implemented — connect /api/events/:id/card");
+}
+
+async function loadAnalysis(fightId){
+  // return await (await fetch(`${API_BASE}/api/fights/${fightId}/analysis`)).json();
+  throw new Error("loadAnalysis() not implemented — connect /api/fights/:id/analysis");
+}
+
+const statusLine = document.getElementById('status-line');
+const errorBox = document.getElementById('error-box');
+const eventSelect = document.getElementById('event-select');
+const analyzeBtn = document.getElementById('analyze-btn');
+const content = document.getElementById('content');
+
+function showError(msg){
+  errorBox.textContent = msg;
+  errorBox.style.display = 'block';
+}
+function clearError(){
+  errorBox.style.display = 'none';
+}
+
+function escapeHtml(s){
+  return (s||'').toString().replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function init(){
+  clearError();
+  statusLine.textContent = "Loading upcoming events…";
+  try{
+    const events = await loadEvents();
+    eventSelect.innerHTML = '';
+    events.forEach(e=>{
+      const opt = document.createElement('option');
+      opt.value = e.id;
+      opt.textContent = `${e.name} — ${e.date}`;
+      eventSelect.appendChild(opt);
+    });
+    analyzeBtn.disabled = events.length === 0;
+    statusLine.textContent = events.length ? `${events.length} upcoming event(s) loaded.` : "No events returned.";
+  }catch(err){
+    statusLine.textContent = "";
+    showError("Couldn't load events: " + err.message);
+    analyzeBtn.disabled = true;
+  }
+}
+
+async function analyzeCard(){
+  clearError();
+  const eventId = eventSelect.value;
+  if(!eventId) return;
+  analyzeBtn.disabled = true;
+  statusLine.textContent = "Pulling fight card…";
+  content.innerHTML = '';
+  try{
+    const cardData = await loadCard(eventId);
+    const eventCard = document.createElement('div');
+    eventCard.className = 'event-card';
+    eventCard.innerHTML = `<h2>${escapeHtml(cardData.name)}</h2><div class="event-meta">${escapeHtml(cardData.date)} · ${escapeHtml(cardData.venue||'')}</div>`;
+    content.appendChild(eventCard);
+
+    for(const fight of cardData.fights){
+      const fightEl = document.createElement('div');
+      fightEl.className = 'fight';
+      fightEl.innerHTML = `
+        <div class="fight-header">
+          <span class="matchup">${escapeHtml(fight.fighterA.name)} (${escapeHtml(fight.fighterA.record)}) vs ${escapeHtml(fight.fighterB.name)} (${escapeHtml(fight.fighterB.record)})</span>
+          <span class="weight">${escapeHtml(fight.weightClass)}</span>
+        </div>
+        <div class="fight-body" id="analysis-${fight.id}">
+          <span style="color:var(--muted)">Loading breakdown…</span>
+        </div>
+      `;
+      content.appendChild(fightEl);
+
+      loadAnalysis(fight.id).then(a=>{
+        const el = document.getElementById(`analysis-${fight.id}`);
+        const confClass = a.lean.confidence === 'strong' ? 'strong' : a.lean.confidence === 'lean' ? 'lean' : 'toss';
+        el.innerHTML = `
+          <div><strong>Lean:</strong> ${escapeHtml(a.lean.fighter)}
+            <span class="conf-badge ${confClass}">${escapeHtml(a.lean.confidence)}</span>
+          </div>
+          <div style="margin-top:4px;">${escapeHtml(a.lean.reasoning)}</div>
+          ${a.odds ? `<h4>Odds</h4><div><span class="odds">${escapeHtml(a.fighterA.name)} ${escapeHtml(a.odds.fighterA)}</span> &nbsp; <span class="odds">${escapeHtml(a.fighterB.name)} ${escapeHtml(a.odds.fighterB)}</span> <span style="color:var(--muted)">(${escapeHtml(a.odds.book)})</span></div>` : ''}
+          <h4>Recent form</h4>
+          <div>${escapeHtml(a.fighterA.name)}: ${escapeHtml((a.fighterA.recentForm||[]).join(', '))}</div>
+          <div>${escapeHtml(a.fighterB.name)}: ${escapeHtml((a.fighterB.recentForm||[]).join(', '))}</div>
+          <h4>Style comparison</h4>
+          <div>${escapeHtml(a.fighterA.name)}: ${escapeHtml(a.fighterA.style)}</div>
+          <div>${escapeHtml(a.fighterB.name)}: ${escapeHtml(a.fighterB.style)}</div>
+          ${a.commonOpponents && a.commonOpponents.length ? `<h4>Common opponents</h4>` + a.commonOpponents.map(c=>`<div>${escapeHtml(c.opponent)}: ${escapeHtml(a.fighterA.name)} ${escapeHtml(c.resultA)}, ${escapeHtml(a.fighterB.name)} ${escapeHtml(c.resultB)}</div>`).join('') : ''}
+          ${a.sources && a.sources.length ? `<h4>Sources</h4>` + a.sources.map(s=>`<div><a href="${escapeHtml(s.url)}" target="_blank" style="color:var(--accent);">${escapeHtml(s.label)}</a></div>`).join('') : ''}
+        `;
+      }).catch(err=>{
+        const el = document.getElementById(`analysis-${fight.id}`);
+        el.innerHTML = `<span style="color:var(--accent);">Couldn't load analysis: ${escapeHtml(err.message)}</span>`;
+      });
+    }
+    statusLine.textContent = `${cardData.fights.length} fight(s) on this card.`;
+  }catch(err){
+    showError("Couldn't load card: " + err.message);
+    content.innerHTML = '<div class="empty">Nothing loaded.</div>';
+  }
+  analyzeBtn.disabled = false;
+}
+
+document.getElementById('analyze-btn').onclick = analyzeCard;
+document.getElementById('refresh-events-btn').onclick = init;
+
+init();
+</script>
+</body>
+</html>
