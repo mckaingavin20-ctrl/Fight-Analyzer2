@@ -23,3 +23,4 @@ timeoutMs = 20000
 
 [userenv.shared]
 ODDS_API_KEY = "6bec63c9baf244bda0de323935d17bfd"
+GOOGLE_AI_API_KEY = "AQ.Ab8RN6LsJGramxZ_1wRGO_p-Ao31n3YDP34shLU-e1UVtbwqsg"
