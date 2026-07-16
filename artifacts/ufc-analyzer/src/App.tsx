@@ -3,6 +3,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
 import Analyzer from '@/pages/analyzer';
+import { AgeGate } from '@/components/age-gate';
 import { Route, Switch, Router as WouterRouter } from 'wouter';
 import { useEffect } from 'react';
 
@@ -32,9 +33,11 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
-          <Router />
-        </WouterRouter>
+        <AgeGate>
+          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
+            <Router />
+          </WouterRouter>
+        </AgeGate>
         <Toaster />
       </TooltipProvider>
     </QueryClientProvider>

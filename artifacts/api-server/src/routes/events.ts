@@ -73,8 +73,8 @@ router.get("/events/:eventId/card", async (req, res) => {
         weightClass: "MMA",
         order: i,
         isMain: i === 0,
-        fighterA: { name: bout.fighterA.name, record: "–", ufcStatsId: null },
-        fighterB: { name: bout.fighterB.name, record: "–", ufcStatsId: null },
+        fighterA: { name: bout.fighterA.name, record: "–", ufcStatsId: null, espnId: bout.fighterA.espnId || null },
+        fighterB: { name: bout.fighterB.name, record: "–", ufcStatsId: null, espnId: bout.fighterB.espnId || null },
         ...(odds ? { oddsA: odds.oddsA, oddsB: odds.oddsB, oddsBook: odds.book } : {}),
       };
     });

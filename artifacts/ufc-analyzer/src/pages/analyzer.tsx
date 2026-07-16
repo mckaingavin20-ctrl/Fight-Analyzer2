@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useListEvents, useGetEventCard, getGetEventCardQueryKey } from '@workspace/api-client-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { AlertTriangle, Swords, Calendar, MapPin, Loader2, Brain } from 'lucide-react';
+import { Calendar, MapPin, Loader2, ChevronDown } from 'lucide-react';
 import { FightRow } from '@/components/fight-row';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -16,7 +16,6 @@ export default function Analyzer() {
     }
   }, [events, selectedEventId]);
 
-  // item 8: 5-minute stale time for event card so odds refresh frequently
   const { data: eventCard, isLoading: isLoadingCard } = useGetEventCard(selectedEventId, {
     query: {
       enabled: !!selectedEventId,
@@ -25,63 +24,73 @@ export default function Analyzer() {
     }
   });
 
-  const selectedEvent = events?.find(e => e.id === selectedEventId);
-
   return (
     <div className="min-h-[100dvh] bg-background text-foreground">
-      {/* Top banner */}
-      <div className="bg-amber-950/40 border-b border-amber-800/30 text-amber-200/80 py-2 px-4 flex items-start sm:items-center justify-center gap-2 text-xs font-mono">
-        <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5 sm:mt-0" />
-        <span>MMA is highly unpredictable. This is AI-generated analysis for informational purposes only — not financial advice.</span>
-      </div>
 
-      {/* Hero header */}
-      <div className="border-b border-white/5 bg-black/30">
-        <div className="max-w-5xl mx-auto px-4 py-5 sm:py-8">
-          {/* Title row */}
-          <div className="flex items-center justify-between gap-3 mb-3 sm:mb-1">
-            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-              <Swords className="w-5 h-5 sm:w-7 sm:h-7 text-primary shrink-0" />
-              <h1 className="text-lg sm:text-3xl font-black uppercase tracking-tight truncate">
-                UFC Card Analyzer
-              </h1>
+      {/* ── Header ───────────────────────────────────────────────── */}
+      <header
+        className="border-b border-white/5"
+        style={{ background: 'linear-gradient(180deg, #0a0a1a 0%, #0d0d1f 100%)' }}
+      >
+        <div className="max-w-5xl mx-auto px-4 py-4 sm:py-6">
+          {/* Brand row */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+            <div>
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl sm:text-4xl font-black uppercase tracking-tight text-white">
+                  GAVIN'S
+                </span>
+                <span
+                  className="text-2xl sm:text-4xl font-black uppercase tracking-tight"
+                  style={{ color: '#22e66e' }}
+                >
+                  PICKS
+                </span>
+              </div>
+              <p className="text-[11px] sm:text-xs font-mono tracking-[0.2em] uppercase mt-1"
+                style={{ color: '#3a3a5c' }}>
+                UFC · FIGHT NIGHT ANALYSIS · OFFICIAL PICKS
+              </p>
             </div>
-            {/* Replit AI badge — desktop only, shown inline with title */}
-            <div className="hidden sm:flex items-center gap-2 text-xs font-mono text-muted-foreground uppercase shrink-0">
-              <Brain className="w-3.5 h-3.5 text-primary" />
-              Replit AI
+
+            {/* Live indicator */}
+            <div className="flex items-center gap-2 self-start sm:self-auto">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+              </span>
+              <span className="text-[10px] font-mono uppercase tracking-widest text-green-400/70">
+                Live Odds
+              </span>
             </div>
           </div>
 
-          <p className="text-muted-foreground text-xs pl-7 sm:pl-10 mb-4 sm:mb-5">
-            AI-powered fight scouting · style clashes · common-opponent tape · confident picks
-          </p>
-
-          {/* Event selector row */}
-          <div className="flex items-center gap-2 sm:gap-3">
-            {/* Replit AI badge — mobile, shown left of select */}
-            <div className="flex sm:hidden items-center gap-1.5 text-[10px] font-mono text-muted-foreground uppercase shrink-0">
-              <Brain className="w-3 h-3 text-primary" />
-              Replit AI
-            </div>
+          {/* Event selector */}
+          <div className="relative">
             <Select
               value={selectedEventId}
               onValueChange={setSelectedEventId}
               disabled={isLoadingEvents}
             >
-              <SelectTrigger className="flex-1 sm:w-[320px] sm:flex-none bg-card border-card-border text-sm">
+              <SelectTrigger
+                className="w-full sm:w-80 text-sm border-white/10 bg-white/5 backdrop-blur"
+                style={{ borderRadius: '10px' }}
+              >
                 {isLoadingEvents ? (
                   <span className="text-muted-foreground flex items-center gap-2">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading events…
                   </span>
                 ) : (
-                  <SelectValue placeholder="Select an event" />
+                  <div className="flex items-center gap-2">
+                    <ChevronDown className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                    <SelectValue placeholder="Select an event" />
+                  </div>
                 )}
               </SelectTrigger>
               <SelectContent>
                 {events?.map((event) => (
                   <SelectItem key={event.id} value={event.id}>
-                    <span className="font-medium">{event.name}</span>
+                    <span className="font-semibold">{event.name}</span>
                     <span className="text-muted-foreground ml-2 text-xs">
                       {new Date(event.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                     </span>
@@ -91,8 +100,9 @@ export default function Analyzer() {
             </Select>
           </div>
         </div>
-      </div>
+      </header>
 
+      {/* ── Main content ─────────────────────────────────────────── */}
       <main className="max-w-5xl mx-auto px-3 sm:px-4 py-5 sm:py-8">
 
         {/* Loading skeleton */}
@@ -100,13 +110,18 @@ export default function Analyzer() {
           <div className="space-y-3">
             <div className="flex items-center gap-3 mb-6">
               <Loader2 className="w-4 h-4 text-primary animate-spin" />
-              <span className="font-mono text-xs text-muted-foreground uppercase">Loading fight card…</span>
+              <span className="font-mono text-xs text-muted-foreground uppercase tracking-widest">
+                Loading fight card…
+              </span>
             </div>
             {[...Array(5)].map((_, i) => (
-              <div key={i} className="bg-card border border-card-border rounded-lg p-4 space-y-3">
+              <div key={i} className="bg-card border border-card-border rounded-2xl p-5 space-y-3">
                 <Skeleton className="h-3 w-20 bg-white/5" />
-                <Skeleton className="h-6 w-2/3 bg-white/5" />
-                <Skeleton className="h-3 w-1/3 bg-white/5" />
+                <div className="flex justify-between gap-4">
+                  <Skeleton className="h-20 w-20 rounded-full bg-white/5" />
+                  <Skeleton className="h-20 w-20 rounded-full bg-white/5" />
+                </div>
+                <Skeleton className="h-4 w-1/2 mx-auto bg-white/5" />
               </div>
             ))}
           </div>
@@ -115,41 +130,47 @@ export default function Analyzer() {
         {/* Event card */}
         {!isLoadingCard && eventCard && (
           <div>
-            {/* Event meta */}
-            <div className="mb-5 pb-4 border-b border-white/8">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div>
-                  <h2 className="text-base sm:text-xl font-black uppercase tracking-tight">{eventCard.name}</h2>
-                  <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs font-mono text-muted-foreground mt-1">
+            {/* Event meta strip */}
+            <div
+              className="mb-5 rounded-xl px-4 py-3 border border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+              style={{ background: 'rgba(255,255,255,0.02)' }}
+            >
+              <div>
+                <h2 className="font-black uppercase tracking-tight text-sm sm:text-base">
+                  {eventCard.name}
+                </h2>
+                <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-[11px] font-mono text-muted-foreground mt-1">
+                  <span className="flex items-center gap-1">
+                    <Calendar className="w-3 h-3" />
+                    {new Date(eventCard.date).toLocaleDateString('en-US', {
+                      weekday: 'long', month: 'long', day: 'numeric', year: 'numeric'
+                    })}
+                  </span>
+                  {(eventCard.venue || eventCard.location) && (
                     <span className="flex items-center gap-1">
-                      <Calendar className="w-3 h-3" />
-                      {new Date(eventCard.date).toLocaleDateString('en-US', {
-                        weekday: 'long', month: 'long', day: 'numeric', year: 'numeric'
-                      })}
+                      <MapPin className="w-3 h-3" />
+                      {[eventCard.venue, eventCard.location].filter(Boolean).join(' · ')}
                     </span>
-                    {(eventCard.venue || eventCard.location) && (
-                      <span className="flex items-center gap-1">
-                        <MapPin className="w-3 h-3" />
-                        {[eventCard.venue, eventCard.location].filter(Boolean).join(' · ')}
-                      </span>
-                    )}
-                  </div>
+                  )}
                 </div>
-                <div className="text-xs font-mono text-muted-foreground bg-white/5 border border-white/10 px-3 py-1.5 rounded-md self-start sm:self-auto whitespace-nowrap">
-                  {eventCard.fights.length} fights · tap to scout
-                </div>
+              </div>
+              <div
+                className="text-[11px] font-mono uppercase tracking-widest px-3 py-1.5 rounded-lg self-start sm:self-auto whitespace-nowrap border"
+                style={{ color: '#22e66e', borderColor: 'rgba(34,230,110,0.2)', background: 'rgba(34,230,110,0.05)' }}
+              >
+                {eventCard.fights.length} fights on card
               </div>
             </div>
 
-            {/* Fight rows */}
-            <div className="space-y-2 sm:space-y-3">
+            {/* Fight cards */}
+            <div className="space-y-3 sm:space-y-4">
               {eventCard.fights.map((fight) => (
                 <FightRow key={fight.id} fight={fight} />
               ))}
             </div>
 
-            <p className="text-center text-xs font-mono text-muted-foreground/50 mt-8 pb-6">
-              Analysis powered by Replit AI · Odds from The Odds API · Refreshed daily at 06:00 UTC
+            <p className="text-center text-[10px] font-mono text-muted-foreground/30 mt-8 pb-6 uppercase tracking-widest">
+              Picks by Gavin · Odds via The Odds API · Updated daily
             </p>
           </div>
         )}
@@ -157,9 +178,9 @@ export default function Analyzer() {
         {/* Empty state */}
         {!isLoadingCard && !isLoadingEvents && !eventCard && events && events.length === 0 && (
           <div className="text-center py-24 text-muted-foreground font-mono">
-            <Swords className="w-10 h-10 mx-auto mb-4 text-white/10" />
-            <p>No upcoming UFC events found.</p>
-            <p className="text-xs mt-2">Check back closer to the next event.</p>
+            <div className="text-4xl mb-4">🥊</div>
+            <p className="font-bold uppercase tracking-widest">No upcoming events found.</p>
+            <p className="text-xs mt-2 opacity-50">Check back closer to the next fight night.</p>
           </div>
         )}
       </main>
