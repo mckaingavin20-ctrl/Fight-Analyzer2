@@ -15,9 +15,10 @@ async function runDailyRefresh(): Promise<void> {
   isRunning = true;
 
   try {
-    logger.info("Daily refresh: clearing all caches");
-    clearDiskCache();
-    clearEspnCaches(); // force re-fetch of event calendar + card data
+    logger.info("Daily refresh: refreshing event/card data (analysis picks preserved)");
+    // DO NOT clear analysis cache — picks must stay locked once made.
+    // batchGenerateAnalyses() already skips any fight that has a cached analysis.
+    clearEspnCaches(); // force re-fetch of event calendar + new fight announcements
 
     // Re-fetch everything fresh
     const [events, allOddsFights] = await Promise.all([

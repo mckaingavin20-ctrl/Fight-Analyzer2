@@ -57,7 +57,7 @@ export function readDiskCache(fightId: string): DeepAnalysis | null {
     const p = getCachePath(fightId);
     if (!fs.existsSync(p)) return null;
     const ageHours = (Date.now() - fs.statSync(p).mtimeMs) / 3_600_000;
-    if (ageHours > 25) return null;
+    if (ageHours > 168) return null; // 7-day TTL — picks are locked until well after the fight
     return JSON.parse(fs.readFileSync(p, "utf8")) as DeepAnalysis;
   } catch {
     return null;
@@ -277,6 +277,7 @@ async function callAI(fight: OddsFight, weightClass: string): Promise<DeepAnalys
 
   const response = await openai.chat.completions.create({
     model: AI_MODEL,
+    temperature: 0,   // deterministic — same input always produces the same pick
     max_completion_tokens: 3500,
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
