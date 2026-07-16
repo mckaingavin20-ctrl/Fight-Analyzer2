@@ -276,9 +276,8 @@ function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }
 
 function ConfidenceBadge({ confidence }: { confidence: string }) {
   const map: Record<string, string> = {
-    strong:   'bg-green-500/20 text-green-400 border-green-500/30',
-    lean:     'bg-amber-500/20 text-amber-400 border-amber-500/30',
-    'toss-up':'bg-gray-500/20 text-gray-400 border-gray-500/30',
+    strong: 'bg-green-500/20 text-green-400 border-green-500/30',
+    lean:   'bg-amber-500/20 text-amber-400 border-amber-500/30',
   };
   return (
     <Badge variant="outline" className={cn('uppercase font-bold font-mono tracking-widest text-[9px] sm:text-[10px]', map[confidence] ?? map['toss-up'])}>
