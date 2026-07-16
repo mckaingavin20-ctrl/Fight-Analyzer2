@@ -1,8 +1,9 @@
 import cron from "node-cron";
 import { logger } from "./logger.js";
-import { getUpcomingEspnEvents, eventDateWindow } from "./espn.js";
+import { getUpcomingEspnEvents, getEspnEventCard, eventDateWindow, clearEspnCaches } from "./espn.js";
 import { fetchAllOddsFights } from "./odds.js";
 import { batchGenerateAnalyses, clearDiskCache } from "./ai-analyzer.js";
+import type { OddsFight } from "./odds.js";
 
 let isRunning = false;
 
@@ -14,28 +15,65 @@ async function runDailyRefresh(): Promise<void> {
   isRunning = true;
 
   try {
-    logger.info("Daily refresh: clearing stale cache");
+    logger.info("Daily refresh: clearing all caches");
     clearDiskCache();
+    clearEspnCaches(); // force re-fetch of event calendar + card data
 
-    const [events, allFights] = await Promise.all([
+    // Re-fetch everything fresh
+    const [events, allOddsFights] = await Promise.all([
       getUpcomingEspnEvents(),
       fetchAllOddsFights(),
     ]);
 
-    // Collect all fights across all upcoming events
-    const toAnalyze: typeof allFights = [];
+    logger.info({ count: events.length }, "Daily refresh: events found");
+
+    // Collect fights across all upcoming events using two-tier approach:
+    // 1. ESPN bout lineup (UFC-only, most accurate)
+    // 2. Odds API fallback for events ESPN hasn't announced yet
+    const fightMap = new Map<string, OddsFight>();
+
     for (const ev of events) {
       const { from, to } = eventDateWindow(ev.date);
-      const card = allFights.filter((f) => {
+
+      // Odds fights in this event's time window
+      const windowOdds = allOddsFights.filter((f) => {
         const t = new Date(f.commenceTime);
         return t >= from && t <= to;
       });
-      toAnalyze.push(...card);
+
+      if (windowOdds.length === 0) continue; // no odds data → skip pre-gen
+
+      // Try ESPN card first
+      let espnBouts: Awaited<ReturnType<typeof getEspnEventCard>> = [];
+      try {
+        espnBouts = await getEspnEventCard(ev.id, ev.date);
+      } catch (err) {
+        logger.warn({ err, eventId: ev.id }, "ESPN card fetch failed during refresh");
+      }
+
+      if (espnBouts.length > 0) {
+        // Match ESPN bouts to Odds API fights for the fight ID
+        for (const bout of espnBouts) {
+          const match = windowOdds.find((f) => {
+            const sim = (a: string, b: string) => {
+              const na = a.toLowerCase().replace(/[^a-z]/g, "");
+              const nb = b.toLowerCase().replace(/[^a-z]/g, "");
+              return na === nb || na.includes(nb) || nb.includes(na);
+            };
+            return (
+              (sim(bout.fighterA.name, f.fighterA) && sim(bout.fighterB.name, f.fighterB)) ||
+              (sim(bout.fighterA.name, f.fighterB) && sim(bout.fighterB.name, f.fighterA))
+            );
+          });
+          if (match) fightMap.set(match.id, match);
+        }
+      } else {
+        // Fallback: use Odds API fights directly (future event, card not announced yet)
+        for (const f of windowOdds) fightMap.set(f.id, f);
+      }
     }
 
-    // Deduplicate
-    const unique = [...new Map(toAnalyze.map((f) => [f.id, f])).values()];
-
+    const unique = [...fightMap.values()];
     logger.info({ count: unique.length }, "Daily refresh: pre-generating analyses");
     await batchGenerateAnalyses(unique);
     logger.info("Daily refresh complete");
@@ -48,7 +86,7 @@ async function runDailyRefresh(): Promise<void> {
 
 /**
  * Schedule daily analysis refresh at 06:00 UTC.
- * On-demand requests build the cache the first time any fight is opened.
+ * Clears all caches (ESPN, analysis) and re-fetches everything fresh.
  */
 export function scheduleDailyRefresh(): void {
   cron.schedule("0 6 * * *", () => {

@@ -5,9 +5,23 @@ import { fetchAllOddsFights, nameSimilarity } from "../lib/odds.js";
 const router = Router();
 
 router.get("/events", async (_req, res) => {
-  const events = await getUpcomingEspnEvents();
-  // Return up to 8 upcoming events (ESPN is already filtered to UFC only)
-  return res.json(events.slice(0, 8));
+  const [events, allOddsFights] = await Promise.all([
+    getUpcomingEspnEvents(),
+    fetchAllOddsFights(),
+  ]);
+
+  // Only surface events that have at least one fight announced.
+  // Fast check: use Odds API time-window (no ESPN card fetch needed per event).
+  const withFights = events.filter((ev) => {
+    const { from, to } = eventDateWindow(ev.date);
+    return allOddsFights.some((f) => {
+      const t = new Date(f.commenceTime);
+      return t >= from && t <= to;
+    });
+  });
+
+  // Return events that have odds coverage, or fall back to first 8 if none match
+  return res.json(withFights.length ? withFights.slice(0, 8) : events.slice(0, 8));
 });
 
 router.get("/events/:eventId/card", async (req, res) => {
@@ -18,14 +32,14 @@ router.get("/events/:eventId/card", async (req, res) => {
     return res.status(404).json({ error: "Event not found" });
   }
 
-  // ── Source of truth: ESPN bout lineup (real UFC fights only) ──────────
+  const { from, to } = eventDateWindow(ev.date);
+
+  // ── Primary: ESPN bout lineup (UFC-only, exact card) ──────────────────
   const espnBouts = await getEspnEventCard(eventId, ev.date);
 
-  // ── Enrich with odds from The Odds API by name-matching ───────────────
+  // ── Fallback: Odds API when ESPN has no bouts yet ─────────────────────
+  // (Safe for distant future events — non-UFC promotions rarely post odds months ahead)
   const allOddsFights = await fetchAllOddsFights();
-
-  // Only consider odds fights within the event time window
-  const { from, to } = eventDateWindow(ev.date);
   const windowOdds = allOddsFights.filter((f) => {
     const t = new Date(f.commenceTime);
     return t >= from && t <= to;
@@ -35,65 +49,60 @@ router.get("/events/:eventId/card", async (req, res) => {
     let best: (typeof windowOdds)[0] | null = null;
     let bestScore = 0;
     for (const f of windowOdds) {
-      // Try both orientations
-      const scoreAB =
-        nameSimilarity(nameA, f.fighterA) + nameSimilarity(nameB, f.fighterB);
-      const scoreBA =
-        nameSimilarity(nameA, f.fighterB) + nameSimilarity(nameB, f.fighterA);
+      const scoreAB = nameSimilarity(nameA, f.fighterA) + nameSimilarity(nameB, f.fighterB);
+      const scoreBA = nameSimilarity(nameA, f.fighterB) + nameSimilarity(nameB, f.fighterA);
       const score = Math.max(scoreAB, scoreBA);
-      if (score > bestScore && score >= 1.0) {
-        bestScore = score;
-        best = f;
-      }
+      if (score > bestScore && score >= 1.0) { bestScore = score; best = f; }
     }
     return best;
   }
 
-  // Sort: later timestamp first (main card before early prelims),
-  // then by ESPN order descending within same timestamp (main event → opening bout).
-  // ESPN always returns bouts in ascending card order within a segment,
-  // so reversing that order puts the main event at position 0.
-  const sorted = [...espnBouts].sort((a, b) => {
-    const timeDiff = new Date(b.date).getTime() - new Date(a.date).getTime();
-    if (timeDiff !== 0) return timeDiff;
-    return b.espnOrder - a.espnOrder; // main event last in ESPN → first here
-  });
+  if (espnBouts.length > 0) {
+    // Sort: later timestamp first, then reverse ESPN order within same timestamp
+    // so main event (last in ESPN) ends up at index 0
+    const sorted = [...espnBouts].sort((a, b) => {
+      const timeDiff = new Date(b.date).getTime() - new Date(a.date).getTime();
+      if (timeDiff !== 0) return timeDiff;
+      return b.espnOrder - a.espnOrder;
+    });
 
-  const fights = sorted.map((bout, i) => {
-    const odds = findOddsMatch(bout.fighterA.name, bout.fighterB.name);
-    return {
-      id: odds?.id ?? bout.boutUid,
+    const fights = sorted.map((bout, i) => {
+      const odds = findOddsMatch(bout.fighterA.name, bout.fighterB.name);
+      return {
+        id: odds?.id ?? bout.boutUid,
+        weightClass: "MMA",
+        order: i,
+        isMain: i === 0,
+        fighterA: { name: bout.fighterA.name, record: "–", ufcStatsId: null },
+        fighterB: { name: bout.fighterB.name, record: "–", ufcStatsId: null },
+        ...(odds ? { oddsA: odds.oddsA, oddsB: odds.oddsB, oddsBook: odds.book } : {}),
+      };
+    });
+
+    return res.json({ id: ev.id, name: ev.name, date: ev.date, venue: ev.venue, location: ev.location, fights });
+  }
+
+  // ── Odds-only fallback (future events with no ESPN card data yet) ──────
+  if (windowOdds.length > 0) {
+    const sorted = [...windowOdds].sort(
+      (a, b) => new Date(b.commenceTime).getTime() - new Date(a.commenceTime).getTime()
+    );
+    const fights = sorted.map((f, i) => ({
+      id: f.id,
       weightClass: "MMA",
       order: i,
       isMain: i === 0,
-      fighterA: {
-        name: bout.fighterA.name,
-        record: "–",
-        ufcStatsId: null,
-      },
-      fighterB: {
-        name: bout.fighterB.name,
-        record: "–",
-        ufcStatsId: null,
-      },
-      ...(odds
-        ? {
-            oddsA: odds.oddsA,
-            oddsB: odds.oddsB,
-            oddsBook: odds.book,
-          }
-        : {}),
-    };
-  });
+      fighterA: { name: f.fighterA, record: "–", ufcStatsId: null },
+      fighterB: { name: f.fighterB, record: "–", ufcStatsId: null },
+      oddsA: f.oddsA,
+      oddsB: f.oddsB,
+      oddsBook: f.book,
+    }));
+    return res.json({ id: ev.id, name: ev.name, date: ev.date, venue: ev.venue, location: ev.location, fights });
+  }
 
-  return res.json({
-    id: ev.id,
-    name: ev.name,
-    date: ev.date,
-    venue: ev.venue,
-    location: ev.location,
-    fights,
-  });
+  // No fight data available yet for this event
+  return res.json({ id: ev.id, name: ev.name, date: ev.date, venue: ev.venue, location: ev.location, fights: [] });
 });
 
 export default router;

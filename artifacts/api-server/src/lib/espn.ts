@@ -33,6 +33,11 @@ const CACHE_TTL = 30 * 60 * 1000; // 30 min
 const cardCache = new Map<string, { data: EspnBout[]; at: number }>();
 const CARD_CACHE_TTL = 15 * 60 * 1000; // 15 min
 
+export function clearEspnCaches(): void {
+  calendarCache = null;
+  cardCache.clear();
+}
+
 function extractEventId(ref: string): string | null {
   const m = ref?.match(/events\/(\d+)/);
   return m ? m[1] : null;
