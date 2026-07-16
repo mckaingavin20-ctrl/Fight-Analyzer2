@@ -8,7 +8,11 @@ import { logger } from "./logger.js";
 import fs from "node:fs";
 import path from "node:path";
 
-const CACHE_DIR = "/tmp/ufc-sherdog-cache";
+// Stored inside the project directory so it survives server restarts.
+const CACHE_DIR = path.resolve(
+  path.dirname(new URL(import.meta.url).pathname),
+  "../.cache/sherdog"    // dist/../.cache → artifacts/api-server/.cache/sherdog
+);
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const SHERDOG_BASE = "https://www.sherdog.com";
 const UA =

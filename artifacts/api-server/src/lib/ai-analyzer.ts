@@ -45,8 +45,13 @@ export interface DeepAnalysis {
   };
 }
 
-// ── Disk cache (25-hour TTL) ──────────────────────────────────────────
-const CACHE_DIR = "/tmp/ufc-analysis-cache";
+// ── Disk cache ────────────────────────────────────────────────────────
+// Stored inside the project directory so it survives server restarts and
+// redeployments. /tmp is wiped on every restart which caused picks to change.
+const CACHE_DIR = path.resolve(
+  path.dirname(new URL(import.meta.url).pathname),
+  "../.cache/analysis"   // dist/../.cache → artifacts/api-server/.cache/analysis
+);
 
 function getCachePath(fightId: string): string {
   return path.join(CACHE_DIR, `${fightId}.json`);
@@ -277,7 +282,6 @@ async function callAI(fight: OddsFight, weightClass: string): Promise<DeepAnalys
 
   const response = await openai.chat.completions.create({
     model: AI_MODEL,
-    temperature: 0,   // deterministic — same input always produces the same pick
     max_completion_tokens: 3500,
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
