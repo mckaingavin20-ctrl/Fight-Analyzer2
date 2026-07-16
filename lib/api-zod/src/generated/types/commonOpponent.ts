@@ -14,4 +14,6 @@ export interface CommonOpponent {
   methodA?: string | null;
   /** @nullable */
   methodB?: string | null;
+  /** @nullable */
+  notes?: string | null;
 }

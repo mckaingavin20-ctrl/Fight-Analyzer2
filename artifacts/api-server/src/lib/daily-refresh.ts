@@ -2,11 +2,11 @@ import cron from "node-cron";
 import { logger } from "./logger.js";
 import { getUpcomingEspnEvents, eventDateWindow } from "./espn.js";
 import { fetchAllOddsFights } from "./odds.js";
-import { generateDeepAnalysis, clearDiskCache, readDiskCache } from "./ai-analyzer.js";
+import { batchGenerateAnalyses, clearDiskCache } from "./ai-analyzer.js";
 
 let isRunning = false;
 
-async function runDailyRefresh(force = false): Promise<void> {
+async function runDailyRefresh(): Promise<void> {
   if (isRunning) {
     logger.info("Daily refresh already running — skipping");
     return;
@@ -14,17 +14,15 @@ async function runDailyRefresh(force = false): Promise<void> {
   isRunning = true;
 
   try {
-    if (force) {
-      logger.info("Daily refresh: clearing stale cache");
-      clearDiskCache();
-    }
+    logger.info("Daily refresh: clearing stale cache");
+    clearDiskCache();
 
     const [events, allFights] = await Promise.all([
       getUpcomingEspnEvents(),
       fetchAllOddsFights(),
     ]);
 
-    // Collect all fights across upcoming events
+    // Collect all fights across all upcoming events
     const toAnalyze: typeof allFights = [];
     for (const ev of events) {
       const { from, to } = eventDateWindow(ev.date);
@@ -35,24 +33,14 @@ async function runDailyRefresh(force = false): Promise<void> {
       toAnalyze.push(...card);
     }
 
-    // Deduplicate and skip already-cached fights
+    // Deduplicate
     const unique = [...new Map(toAnalyze.map((f) => [f.id, f])).values()];
-    const needed = unique.filter((f) => !readDiskCache(f.id));
 
-    logger.info({ total: unique.length, toGenerate: needed.length }, "Daily refresh: queuing analysis");
-
-    // Process sequentially — semaphore in generateDeepAnalysis handles concurrency safety.
-    // 8s between calls keeps us comfortably under Gemini free-tier 15 RPM.
-    for (const fight of needed) {
-      try {
-        await generateDeepAnalysis(fight, "MMA");
-        await new Promise((r) => setTimeout(r, 8000));
-      } catch (err) {
-        logger.error({ err, fightId: fight.id }, "Failed during daily refresh — continuing");
-      }
-    }
-
+    logger.info({ count: unique.length }, "Daily refresh: pre-generating analyses");
+    await batchGenerateAnalyses(unique);
     logger.info("Daily refresh complete");
+  } catch (err) {
+    logger.error({ err }, "Daily refresh failed");
   } finally {
     isRunning = false;
   }
@@ -60,17 +48,15 @@ async function runDailyRefresh(force = false): Promise<void> {
 
 /**
  * Schedule daily analysis refresh at 06:00 UTC.
- * No startup warmup — the on-demand route handles first-load analysis.
- * The daily cron clears stale cache and pre-builds fresh analyses each morning.
+ * On-demand requests build the cache the first time any fight is opened.
  */
 export function scheduleDailyRefresh(): void {
-  // Daily at 06:00 UTC — clears cache and regenerates all fights
   cron.schedule("0 6 * * *", () => {
-    logger.info("Daily 06:00 UTC refresh triggered");
-    runDailyRefresh(true).catch((err) =>
-      logger.error({ err }, "Scheduled refresh failed")
+    logger.info("06:00 UTC daily refresh triggered");
+    runDailyRefresh().catch((err) =>
+      logger.error({ err }, "Scheduled daily refresh crashed")
     );
   });
 
-  logger.info("Daily refresh scheduled for 06:00 UTC (on-demand cache handles first loads)");
+  logger.info("Daily refresh scheduled for 06:00 UTC");
 }

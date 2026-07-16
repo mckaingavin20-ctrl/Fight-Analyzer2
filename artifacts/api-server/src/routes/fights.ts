@@ -80,6 +80,7 @@ router.get("/fights/:fightId/analysis", async (req, res) => {
         methodA: co.methodA,
         resultB: co.resultB,
         methodB: co.methodB,
+        notes: co.notes ?? null,
       })),
       odds: fight.oddsA && fight.oddsB
         ? { fighterA: americanA, fighterB: americanB, book: fight.book }
@@ -93,7 +94,7 @@ router.get("/fights/:fightId/analysis", async (req, res) => {
       },
       styleMatchup: analysis.styleMatchup ?? null,
       sources: [
-        { label: "AI Fight Scout", url: "https://openai.com" },
+        { label: "Replit AI", url: "https://replit.com" },
         { label: "The Odds API", url: "https://the-odds-api.com" },
       ],
     });

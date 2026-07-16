@@ -19,5 +19,7 @@ export interface FightAnalysis {
   commonOpponents?: CommonOpponent[];
   odds?: FightOdds | null;
   lean: Lean;
+  /** @nullable */
+  styleMatchup?: string | null;
   sources?: Source[];
 }

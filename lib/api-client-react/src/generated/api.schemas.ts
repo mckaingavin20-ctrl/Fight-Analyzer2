@@ -89,6 +89,8 @@ export interface CommonOpponent {
   methodA?: string | null;
   /** @nullable */
   methodB?: string | null;
+  /** @nullable */
+  notes?: string | null;
 }
 
 export interface FightOdds {
@@ -127,6 +129,8 @@ export interface FightAnalysis {
   commonOpponents?: CommonOpponent[];
   odds?: FightOdds | null;
   lean: Lean;
+  /** @nullable */
+  styleMatchup?: string | null;
   sources?: Source[];
 }
 

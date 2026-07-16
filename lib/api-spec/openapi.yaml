@@ -254,6 +254,8 @@ components:
           type: ["string", "null"]
         methodB:
           type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
 
     FightOdds:
       type: object
@@ -308,6 +310,8 @@ components:
             - type: "null"
         lean:
           $ref: "#/components/schemas/Lean"
+        styleMatchup:
+          type: ["string", "null"]
         sources:
           type: array
           items:

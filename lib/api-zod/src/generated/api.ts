@@ -118,7 +118,8 @@ export const GetFightAnalysisResponse = zod.object({
   "resultA": zod.string(),
   "resultB": zod.string(),
   "methodA": zod.string().nullish(),
-  "methodB": zod.string().nullish()
+  "methodB": zod.string().nullish(),
+  "notes": zod.string().nullish()
 })).optional(),
   "odds": zod.union([zod.object({
   "fighterA": zod.string(),
@@ -132,6 +133,7 @@ export const GetFightAnalysisResponse = zod.object({
   "keyEdges": zod.array(zod.string()).optional(),
   "riskFactors": zod.array(zod.string()).optional()
 }),
+  "styleMatchup": zod.string().nullish(),
   "sources": zod.array(zod.object({
   "label": zod.string(),
   "url": zod.string()
