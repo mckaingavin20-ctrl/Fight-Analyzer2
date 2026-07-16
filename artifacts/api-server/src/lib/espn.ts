@@ -18,12 +18,29 @@ export interface EspnEvent {
   location: string | null;
 }
 
+export interface EspnBout {
+  boutUid: string;      // unique competition UID
+  date: string;         // ISO datetime of this bout
+  espnOrder: number;    // original ESPN array index (0 = first prelim, N = main event)
+  fighterA: { espnId: string; name: string };
+  fighterB: { espnId: string; name: string };
+}
+
 let calendarCache: { data: EspnEvent[]; at: number } | null = null;
 const CACHE_TTL = 30 * 60 * 1000; // 30 min
+
+// Per-event card cache: eventId -> bouts
+const cardCache = new Map<string, { data: EspnBout[]; at: number }>();
+const CARD_CACHE_TTL = 15 * 60 * 1000; // 15 min
 
 function extractEventId(ref: string): string | null {
   const m = ref?.match(/events\/(\d+)/);
   return m ? m[1] : null;
+}
+
+function dateStr(d: Date): string {
+  // YYYYMMDD in UTC
+  return d.toISOString().slice(0, 10).replace(/-/g, "");
 }
 
 export async function getUpcomingEspnEvents(): Promise<EspnEvent[]> {
@@ -70,6 +87,77 @@ export async function getUpcomingEspnEvents(): Promise<EspnEvent[]> {
   logger.info({ count: events.length }, "Fetched UFC events from ESPN");
   calendarCache = { data: events, at: Date.now() };
   return events;
+}
+
+/**
+ * Fetch the actual bout lineup for a specific UFC event from ESPN.
+ * Uses the /events?dates= endpoint which returns real UFC bouts (not other promotions).
+ * Queries the event date and the day before (UTC timezone boundary).
+ */
+export async function getEspnEventCard(
+  eventId: string,
+  eventDate: string
+): Promise<EspnBout[]> {
+  const cached = cardCache.get(eventId);
+  if (cached && Date.now() - cached.at < CARD_CACHE_TTL) {
+    return cached.data;
+  }
+
+  const d = new Date(eventDate);
+  const dayBefore = new Date(d.getTime() - 24 * 60 * 60 * 1000);
+
+  // Query both dates to handle UTC boundary issues (events at 21:00 UTC show on the prior day)
+  const dates = Array.from(new Set([dateStr(dayBefore), dateStr(d)]));
+
+  interface EspnCompetitor {
+    id: string;
+    displayName: string;
+    homeAway: string;
+  }
+  interface EspnBoutRaw {
+    id: string;
+    uid: string;
+    date: string;
+    competitors: EspnCompetitor[];
+  }
+  interface EspnEventsResponse {
+    events?: EspnBoutRaw[];
+  }
+
+  const boutMap = new Map<string, EspnBout>(); // keyed by boutUid
+
+  for (const dateParam of dates) {
+    try {
+      const res = await axios.get<EspnEventsResponse>(
+        `${ESPN_BASE}/events`,
+        { params: { dates: dateParam }, timeout: 12000 }
+      );
+      const bouts = res.data.events ?? [];
+      for (const b of bouts) {
+        if (b.id !== eventId) continue; // only bouts for this UFC event
+        if (boutMap.has(b.uid)) continue; // dedup
+
+        const home = b.competitors.find((c) => c.homeAway === "home") ?? b.competitors[0];
+        const away = b.competitors.find((c) => c.homeAway === "away") ?? b.competitors[1];
+        if (!home || !away) continue;
+
+        boutMap.set(b.uid, {
+          boutUid: b.uid,
+          date: b.date,
+          espnOrder: boutMap.size, // preserves original ESPN array order
+          fighterA: { espnId: home.id, name: home.displayName },
+          fighterB: { espnId: away.id, name: away.displayName },
+        });
+      }
+    } catch (err) {
+      logger.warn({ err, dateParam }, "ESPN events fetch failed for date");
+    }
+  }
+
+  const bouts = Array.from(boutMap.values());
+  logger.info({ eventId, count: bouts.length }, "Fetched UFC event card from ESPN");
+  cardCache.set(eventId, { data: bouts, at: Date.now() });
+  return bouts;
 }
 
 export function eventDateWindow(
