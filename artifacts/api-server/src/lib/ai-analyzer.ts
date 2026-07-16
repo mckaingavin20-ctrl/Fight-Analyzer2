@@ -15,6 +15,7 @@ export interface DeepAnalysis {
   keyEdges: string[];
   riskFactors: string[];
   styleMatchup: string | null;
+  upsetAnalysis: string | null;
   commonOpponents: Array<{
     opponent: string;
     resultA: string;
@@ -80,59 +81,105 @@ export function clearDiskCache(): void {
 // ── In-flight dedup map ───────────────────────────────────────────────
 const inFlight = new Map<string, Promise<DeepAnalysis>>();
 
-// ── Prompts ───────────────────────────────────────────────────────────
-const SYSTEM_PROMPT = `You are an elite MMA analyst and fight scout with encyclopedic knowledge of every significant UFC, Bellator, ONE Championship, PFL, and regional MMA fighter.
+// ── System prompt ─────────────────────────────────────────────────────
+const SYSTEM_PROMPT = `You are an elite MMA analyst, fight scout, and professional handicapper who specializes in finding value on BOTH sides of a fight — including underdogs.
 
-You reason like a head coach preparing a game plan: you study styles, tendencies, training camps, how each fighter imposes their game, where they get exposed, and what tape on common opponents reveals. You do NOT use betting odds to form your pick — you use technique, tape, and record.
+You have encyclopedic knowledge of UFC, Bellator, ONE Championship, PFL, and regional MMA. You reason like a betting analyst who has studied thousands of fights: you know that underdogs win roughly 35-40% of MMA fights, that styles make fights regardless of who is favored, and that the market is routinely wrong about fighters whose style is a nightmare for the favorite.
 
-CRITICAL RULES:
-1. You MUST always pick a winner. "toss-up" is not an option and will never be used. If a fight is close, pick the fighter with more proven tools for this specific matchup and use "lean".
-2. Confidence is exactly one of: "strong" or "lean". Nothing else. Never "toss-up".
-3. Use the verified Sherdog fight record data provided — treat it as ground truth for results, methods, and opponents.
-4. Make your pick based on stylistic thesis, not on who the betting favorite is.
+YOUR CORE ANALYTICAL RULES:
+1. Never default to the favorite just because they are favored. The market reflects public perception, not necessarily style advantage.
+2. Toss-up is not an option. Pick one fighter with either "strong" or "lean" confidence.
+3. If the underdog's style genuinely exploits the favorite's known weaknesses, PICK THE UNDERDOG.
+4. The favorite's loss record is your most important clue. If they've been beaten in the same way the underdog fights, that is a red flag.
+5. Use the Sherdog fight records as ground truth for results and methods.
 
 Respond ONLY with valid JSON. No markdown, no code fences, no prose outside the JSON.`;
 
+// ── Prompt builder ─────────────────────────────────────────────────────
 function buildPrompt(
   fighterA: string,
   fighterB: string,
   weightClass: string,
-  oddsContext: string,
+  favorite: string,
+  underdog: string,
+  favOdds: string,
+  dogOdds: string,
+  favImpliedPct: number,
+  dogImpliedPct: number,
   sherdogA: string | null,
   sherdogB: string | null
 ): string {
+
   const dataBlock = [
-    "=== VERIFIED FIGHT RECORD DATA FROM SHERDOG ===",
-    sherdogA
-      ? `\n--- ${fighterA} ---\n${sherdogA}`
-      : `\n--- ${fighterA} ---\nNo Sherdog data found — use your training knowledge.`,
-    sherdogB
-      ? `\n--- ${fighterB} ---\n${sherdogB}`
-      : `\n--- ${fighterB} ---\nNo Sherdog data found — use your training knowledge.`,
+    "=== VERIFIED FIGHT RECORD DATA (SHERDOG) ===",
+    `\n--- ${fighterA} ---`,
+    sherdogA ?? "No Sherdog data — use your training knowledge for this fighter.",
+    `\n--- ${fighterB} ---`,
+    sherdogB ?? "No Sherdog data — use your training knowledge for this fighter.",
     "=== END SHERDOG DATA ===",
   ].join("\n");
 
-  return `Analyze this MMA fight using the verified data below. Respond ONLY with valid JSON.
+  const underdogResearch = `
+=== MANDATORY UNDERDOG RESEARCH ===
+Market says: ${favorite} is the FAVORITE (${favOdds}, ~${favImpliedPct}% implied win probability)
+Market says: ${underdog} is the UNDERDOG (${dogOdds}, ~${dogImpliedPct}% implied win probability)
+
+HISTORICAL MMA UPSET RATES (use as calibration):
+- Underdogs priced at +100 to +150: win ~42% of fights
+- Underdogs priced at +150 to +250: win ~34% of fights
+- Underdogs priced at +250 to +400: win ~27% of fights
+- Underdogs priced at +400 to +600: win ~19% of fights
+- Underdogs priced at +600+: win ~12% of fights
+- The market is NOT always right. Upsets happen constantly in MMA.
+
+BEFORE YOU PICK, YOU MUST ANSWER THESE QUESTIONS IN YOUR ANALYSIS:
+
+1. FAVORITE'S LOSS PATTERN: Look at ${favorite}'s Sherdog losses. What method/style beat them?
+   Does ${underdog}'s style match that loss pattern? If yes — flag this as an UPSET ALERT.
+
+2. UNDERDOG'S UPSET HISTORY: Has ${underdog} ever beaten someone of similar or higher caliber?
+   Scan their Sherdog record for wins against ranked fighters, champions, or opponents who
+   were heavy favorites. Successful underdogs have done it before.
+
+3. UNDERDOG'S PATH TO VICTORY: Can ${underdog} realistically win? Describe the specific
+   sequence: "If ${underdog} can establish X, then Y becomes available, which enables Z."
+   Be concrete — name the range, the technique, the pattern.
+
+4. STYLE-BASED UPSET POTENTIAL: Some style matchups produce upsets more than others:
+   - Submission specialists vs. wrestlers (guard pullers catching wrestlers)
+   - Orthodox pressure fighters vs. southpaw counterpunchers
+   - High-volume strikers with poor takedown defense vs. elite grapplers
+   - Fighters whose chin/gas tank has been exposed vs. high-output pressure fighters
+   Identify which category this fight falls into.
+
+5. FINAL DECISION: After this research — does the analysis support the favorite OR the
+   underdog? Pick whoever the TAPE supports, regardless of the odds. If you still pick
+   the favorite, explain specifically why the underdog's path to victory fails.
+=== END UNDERDOG RESEARCH ===`;
+
+  return `Analyze this MMA fight with deep underdog research. Respond ONLY with valid JSON.
 
 Fight: ${fighterA} vs ${fighterB}
 Weight Class: ${weightClass}
-${oddsContext}
+
+${underdogResearch}
 
 ${dataBlock}
 
 Required JSON structure:
 {
   "fighter": "<winner pick — must be exactly '${fighterA}' or '${fighterB}'>",
-  "confidence": "<strong or lean — NEVER toss-up. strong = clear stylistic edge; lean = real edge but genuine upset risk>",
-  "reasoning": "<4-6 paragraphs: stylistic thesis, how each fighter imposes their game, what the Sherdog tape tells us about their finishing ability and chin, what decides the outcome. Reference specific opponents from the fight records above. 300+ words.>",
-  "styleMatchup": "<2-3 paragraphs: the specific style friction, the range where this fight lives, and the X-factor that separates them. Mention specific techniques.>",
+  "confidence": "<strong or lean — NEVER toss-up>",
+  "reasoning": "<5-7 paragraphs. Cover: (1) stylistic thesis for your pick, (2) how each fighter imposes their game, (3) the favorite's loss pattern and whether it applies here, (4) the underdog's path to victory and why it succeeds or fails, (5) what the Sherdog tape reveals about finishing ability, chin, gas tank. Reference specific opponents from the records. 400+ words.>",
+  "styleMatchup": "<2-3 paragraphs: the specific style friction, the range where this fight lives, and the X-factor that decides it. Name specific techniques and gameplans.>",
+  "upsetAnalysis": "<3-4 sentences specifically about the underdog: Who is the underdog? What is their realistic path to winning? Does their style exploit the favorite's known loss patterns? Rate upset potential as LOW, MEDIUM, or HIGH and briefly explain why. This field must always be filled — even if you picked the favorite, explain the underdog threat level.>",
   "keyEdges": [
-    "<precise tactical/physical edge for your pick — reference their actual record/methods>",
+    "<precise tactical/physical edge for your pick — tied to their Sherdog record>",
     "<another specific edge>",
     "<another — minimum 3, maximum 6>"
   ],
   "riskFactors": [
-    "<concrete scenario where your pick loses — name the exact technique or pattern that beats them>",
+    "<concrete scenario where your pick loses — name the exact technique or pattern>",
     "<another risk — minimum 2, maximum 4>"
   ],
   "commonOpponents": [
@@ -142,19 +189,19 @@ Required JSON structure:
       "methodA": "<how ${fighterA} won/lost, e.g. TKO R2>",
       "resultB": "<W or L>",
       "methodB": "<how ${fighterB} won/lost>",
-      "notes": "<what the shared tape reveals — compare HOW each fighter performed against this opponent, what was exposed>"
+      "notes": "<what the shared tape reveals — compare HOW each performed, what was exposed>"
     }
   ],
   "fighterAProfile": {
     "name": "${fighterA}",
-    "style": "<primary style tag, e.g. 'Orthodox Pressure Kickboxer | MMA Grappler'>",
-    "strengths": ["<specific strength backed by their record>", "<another>", "<another>"],
-    "weaknesses": ["<weakness exposed in their Sherdog losses>", "<another>"],
+    "style": "<primary style, e.g. 'Orthodox Pressure Kickboxer | MMA Grappler'>",
+    "strengths": ["<specific strength backed by their Sherdog record>", "<another>", "<another>"],
+    "weaknesses": ["<weakness visible in their losses or close fights>", "<another>"],
     "recentForm": ["W", "L", "W", "W", "L"]
   },
   "fighterBProfile": {
     "name": "${fighterB}",
-    "style": "<primary style tag>",
+    "style": "<primary style>",
     "strengths": ["<strength>", "<strength>", "<strength>"],
     "weaknesses": ["<weakness>", "<weakness>"],
     "recentForm": ["W", "W", "W", "L", "W"]
@@ -162,23 +209,45 @@ Required JSON structure:
 }
 
 Rules:
-- recentForm: last 5 fights from Sherdog data, most recent first, "W" or "L" only.
-- commonOpponents: list up to 4 real shared opponents from the Sherdog records. Empty array [] only if genuinely no shared opponents.
-- You MUST pick a winner. If it's genuinely close, pick the fighter with more proven finishing ability in this specific range and use "lean".
-- Do NOT base your pick on the odds. Base it on technique, tape, and style matchup.`;
+- recentForm: last 5 fights from Sherdog, most recent first, "W" or "L" only.
+- commonOpponents: up to 4 real shared opponents from the Sherdog records. [] only if genuinely none.
+- You MUST pick a winner. "toss-up" is never allowed.
+- DO NOT default to the favorite. The underdog wins ~25-35% of fights. If their style fits, pick them.
+- upsetAnalysis must always be filled with real content, not a placeholder.`;
 }
 
 // ── Core analysis function ────────────────────────────────────────────
 async function callAI(fight: OddsFight, weightClass: string): Promise<DeepAnalysis> {
-  const oddsContext =
-    fight.oddsA && fight.oddsB
-      ? `Market odds (reference only — do NOT base your pick on these): ${fight.fighterA} ${decimalToAmerican(fight.oddsA)} / ${fight.fighterB} ${decimalToAmerican(fight.oddsB)}`
-      : "";
+  // Determine favorite/underdog from odds
+  let favorite = fight.fighterA;
+  let underdog = fight.fighterB;
+  let favDecimal = fight.oddsA;
+  let dogDecimal = fight.oddsB;
+
+  if (fight.oddsA && fight.oddsB && fight.oddsB < fight.oddsA) {
+    // Lower decimal odds = more likely to win = favorite
+    favorite = fight.fighterB;
+    underdog = fight.fighterA;
+    favDecimal = fight.oddsB;
+    dogDecimal = fight.oddsA;
+  }
+
+  const favOdds = favDecimal ? decimalToAmerican(favDecimal) : "N/A";
+  const dogOdds = dogDecimal ? decimalToAmerican(dogDecimal) : "N/A";
+
+  let favImpliedPct = 50;
+  let dogImpliedPct = 50;
+  if (fight.oddsA && fight.oddsB) {
+    const { probA, probB } = trueProbs(fight.oddsA, fight.oddsB);
+    const favIsA = favorite === fight.fighterA;
+    favImpliedPct = Math.round((favIsA ? probA : probB) * 100);
+    dogImpliedPct = 100 - favImpliedPct;
+  }
 
   // Fetch Sherdog data for both fighters in parallel
   logger.info(
-    { fighterA: fight.fighterA, fighterB: fight.fighterB },
-    "Fetching Sherdog data for fight"
+    { fighterA: fight.fighterA, fighterB: fight.fighterB, favorite, underdog },
+    "Fetching Sherdog data — favorite/underdog identified"
   );
 
   const [dataA, dataB] = await Promise.allSettled([
@@ -186,18 +255,14 @@ async function callAI(fight: OddsFight, weightClass: string): Promise<DeepAnalys
     getFighterData(fight.fighterB),
   ]);
 
-  const sherdogA =
-    dataA.status === "fulfilled" && dataA.value
-      ? formatSherdogContext(dataA.value)
-      : null;
-  const sherdogB =
-    dataB.status === "fulfilled" && dataB.value
-      ? formatSherdogContext(dataB.value)
-      : null;
+  const sherdogA = dataA.status === "fulfilled" && dataA.value
+    ? formatSherdogContext(dataA.value) : null;
+  const sherdogB = dataB.status === "fulfilled" && dataB.value
+    ? formatSherdogContext(dataB.value) : null;
 
-  if (sherdogA) logger.info({ fighter: fight.fighterA }, "Sherdog data included in prompt");
+  if (sherdogA) logger.info({ fighter: fight.fighterA }, "Sherdog data included");
   else logger.warn({ fighter: fight.fighterA }, "No Sherdog data — AI using training knowledge");
-  if (sherdogB) logger.info({ fighter: fight.fighterB }, "Sherdog data included in prompt");
+  if (sherdogB) logger.info({ fighter: fight.fighterB }, "Sherdog data included");
   else logger.warn({ fighter: fight.fighterB }, "No Sherdog data — AI using training knowledge");
 
   logger.info(
@@ -207,7 +272,7 @@ async function callAI(fight: OddsFight, weightClass: string): Promise<DeepAnalys
 
   const response = await openai.chat.completions.create({
     model: "gpt-5.6-terra",
-    max_completion_tokens: 3000,
+    max_completion_tokens: 3500,
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
       {
@@ -216,7 +281,12 @@ async function callAI(fight: OddsFight, weightClass: string): Promise<DeepAnalys
           fight.fighterA,
           fight.fighterB,
           weightClass || "MMA",
-          oddsContext,
+          favorite,
+          underdog,
+          favOdds,
+          dogOdds,
+          favImpliedPct,
+          dogImpliedPct,
           sherdogA,
           sherdogB
         ),
@@ -235,32 +305,33 @@ async function callAI(fight: OddsFight, weightClass: string): Promise<DeepAnalys
     return oddsFallback(fight);
   }
 
-  // Normalize confidence — never allow "toss-up" to slip through
+  // Hard-enforce: no toss-up allowed
   if (!["strong", "lean"].includes(parsed.confidence as string)) {
     parsed.confidence = "lean";
   }
 
-  // Ensure fighter names are correctly set
+  // Ensure fighter names are correct
   if (parsed.fighterAProfile) parsed.fighterAProfile.name = fight.fighterA;
   if (parsed.fighterBProfile) parsed.fighterBProfile.name = fight.fighterB;
 
-  // Derive recentForm from Sherdog data if AI hallucinated
+  // Override recentForm with ground-truth Sherdog data
   if (dataA.status === "fulfilled" && dataA.value && parsed.fighterAProfile) {
-    const form = dataA.value.recentFights
-      .slice(0, 5)
-      .map((f) => (f.result === "win" ? "W" : "L"));
+    const form = dataA.value.recentFights.slice(0, 5).map(f => f.result === "win" ? "W" : "L");
     if (form.length > 0) parsed.fighterAProfile.recentForm = form;
   }
   if (dataB.status === "fulfilled" && dataB.value && parsed.fighterBProfile) {
-    const form = dataB.value.recentFights
-      .slice(0, 5)
-      .map((f) => (f.result === "win" ? "W" : "L"));
+    const form = dataB.value.recentFights.slice(0, 5).map(f => f.result === "win" ? "W" : "L");
     if (form.length > 0) parsed.fighterBProfile.recentForm = form;
   }
 
   writeDiskCache(fight.id, parsed);
   logger.info(
-    { fightId: fight.id, pick: parsed.fighter, confidence: parsed.confidence },
+    {
+      fightId: fight.id,
+      pick: parsed.fighter,
+      confidence: parsed.confidence,
+      pickedUnderdog: parsed.fighter === underdog,
+    },
     "AI analysis complete"
   );
   return parsed;
@@ -298,23 +369,17 @@ export async function generateDeepAnalysis(
 
 // ── Batch pre-generation (used by daily-refresh) ──────────────────────
 export async function batchGenerateAnalyses(fights: OddsFight[]): Promise<void> {
-  const needed = fights.filter((f) => !readDiskCache(f.id));
+  const needed = fights.filter(f => !readDiskCache(f.id));
   if (needed.length === 0) {
     logger.info("All analyses already cached — nothing to pre-generate");
     return;
   }
-
   logger.info({ count: needed.length }, "Batch pre-generating fight analyses");
-
   await batchProcess(
     needed,
-    async (fight) => {
-      const result = await callAI(fight, "MMA");
-      return result;
-    },
+    async (fight) => callAI(fight, "MMA"),
     { concurrency: 1, retries: 3 }
   );
-
   logger.info("Batch analysis generation complete");
 }
 
@@ -326,10 +391,11 @@ function oddsFallback(fight: OddsFight): DeepAnalysis {
     return {
       fighter: fighterA,
       confidence: "lean",
-      reasoning: "Insufficient data to generate a full analysis for this fight. Defaulting to Fighter A.",
+      reasoning: "Insufficient data to generate a full analysis.",
       keyEdges: [],
       riskFactors: ["No data available"],
       styleMatchup: null,
+      upsetAnalysis: null,
       commonOpponents: [],
       fighterAProfile: { name: fighterA, style: "Fighter", strengths: [], weaknesses: [], recentForm: [] },
       fighterBProfile: { name: fighterB, style: "Fighter", strengths: [], weaknesses: [], recentForm: [] },
@@ -346,7 +412,6 @@ function oddsFallback(fight: OddsFight): DeepAnalysis {
   const favOdds = favA ? americanA : americanB;
   const dogOdds = favA ? americanB : americanA;
   const favPct = Math.round(favProb * 100);
-  // Odds fallback always uses "lean" — no toss-up
   const confidence: "strong" | "lean" = favProb >= 0.68 ? "strong" : "lean";
 
   return {
@@ -359,6 +424,7 @@ function oddsFallback(fight: OddsFight): DeepAnalysis {
     ],
     riskFactors: ["MMA variance is high even for heavy favorites"],
     styleMatchup: null,
+    upsetAnalysis: `${underdog} is the underdog at ${dogOdds} (~${100 - favPct}% implied). Full style analysis unavailable — manual research recommended before fading the market.`,
     commonOpponents: [],
     fighterAProfile: { name: fighterA, style: "Fighter", strengths: [], weaknesses: [], recentForm: [] },
     fighterBProfile: { name: fighterB, style: "Fighter", strengths: [], weaknesses: [], recentForm: [] },

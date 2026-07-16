@@ -93,6 +93,7 @@ router.get("/fights/:fightId/analysis", async (req, res) => {
         riskFactors: analysis.riskFactors ?? [],
       },
       styleMatchup: analysis.styleMatchup ?? null,
+      upsetAnalysis: analysis.upsetAnalysis ?? null,
       sources: [
         { label: "Replit AI", url: "https://replit.com" },
         { label: "The Odds API", url: "https://the-odds-api.com" },

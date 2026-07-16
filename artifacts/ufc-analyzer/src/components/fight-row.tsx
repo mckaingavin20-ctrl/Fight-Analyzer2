@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useGetFightAnalysis, getGetFightAnalysisQueryKey } from '@workspace/api-client-react';
 import type { FightCard, FighterStats } from '@workspace/api-client-react/src/generated/api.schemas';
-import { ChevronDown, ChevronUp, AlertCircle, ShieldAlert, Target, Swords, Users, ExternalLink, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, AlertCircle, ShieldAlert, Target, Swords, Users, ExternalLink, Loader2, TrendingUp } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -28,6 +28,7 @@ interface RichAnalysis {
     riskFactors: string[];
   };
   styleMatchup?: string | null;
+  upsetAnalysis?: string | null;
   sources?: Array<{ label: string; url: string }>;
 }
 
@@ -158,6 +159,20 @@ export function FightRow({ fight }: { fight: FightCard }) {
                     </div>
                     <div className="text-foreground/90 leading-relaxed space-y-2 sm:space-y-3 text-xs sm:text-sm">
                       {analysis.styleMatchup.split('\n').filter(Boolean).map((para, i) => (
+                        <p key={i}>{para}</p>
+                      ))}
+                    </div>
+                  </div>
+                </section>
+              )}
+
+              {/* Upset Path */}
+              {analysis.upsetAnalysis && (
+                <section>
+                  <SectionHeader icon={<TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-violet-400" />} title="Upset Path" />
+                  <div className="bg-violet-500/5 border border-violet-500/20 p-4 sm:p-5 rounded-md">
+                    <div className="text-foreground/90 leading-relaxed space-y-2 sm:space-y-3 text-xs sm:text-sm">
+                      {analysis.upsetAnalysis.split('\n').filter(Boolean).map((para, i) => (
                         <p key={i}>{para}</p>
                       ))}
                     </div>
