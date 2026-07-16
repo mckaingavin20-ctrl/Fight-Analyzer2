@@ -7,6 +7,9 @@ import { getFighterData, formatSherdogContext } from "./sherdog.js";
 import fs from "node:fs";
 import path from "node:path";
 
+// ── Model config (item 1: configurable via env var) ───────────────────
+const AI_MODEL = process.env["AI_MODEL"] ?? "gpt-5.6-terra";
+
 // ── Types ─────────────────────────────────────────────────────────────
 export interface DeepAnalysis {
   fighter: string;
@@ -16,6 +19,8 @@ export interface DeepAnalysis {
   riskFactors: string[];
   styleMatchup: string | null;
   upsetAnalysis: string | null;
+  /** Whether real Sherdog record data was available for each fighter (item 3) */
+  sherdogUsed: { fighterA: boolean; fighterB: boolean };
   commonOpponents: Array<{
     opponent: string;
     resultA: string;
@@ -271,7 +276,7 @@ async function callAI(fight: OddsFight, weightClass: string): Promise<DeepAnalys
   );
 
   const response = await openai.chat.completions.create({
-    model: "gpt-5.6-terra",
+    model: AI_MODEL,
     max_completion_tokens: 3500,
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
@@ -305,10 +310,16 @@ async function callAI(fight: OddsFight, weightClass: string): Promise<DeepAnalys
     return oddsFallback(fight);
   }
 
-  // Hard-enforce: no toss-up allowed
-  if (!["strong", "lean"].includes(parsed.confidence as string)) {
+  // Hard-enforce: any confidence value that isn't "strong" becomes "lean" (item 5)
+  if (parsed.confidence !== "strong") {
     parsed.confidence = "lean";
   }
+
+  // Track whether real Sherdog data was used (item 3)
+  parsed.sherdogUsed = {
+    fighterA: sherdogA !== null,
+    fighterB: sherdogB !== null,
+  };
 
   // Ensure fighter names are correct
   if (parsed.fighterAProfile) parsed.fighterAProfile.name = fight.fighterA;
@@ -396,6 +407,7 @@ function oddsFallback(fight: OddsFight): DeepAnalysis {
       riskFactors: ["No data available"],
       styleMatchup: null,
       upsetAnalysis: null,
+      sherdogUsed: { fighterA: false, fighterB: false },
       commonOpponents: [],
       fighterAProfile: { name: fighterA, style: "Fighter", strengths: [], weaknesses: [], recentForm: [] },
       fighterBProfile: { name: fighterB, style: "Fighter", strengths: [], weaknesses: [], recentForm: [] },
@@ -425,6 +437,7 @@ function oddsFallback(fight: OddsFight): DeepAnalysis {
     riskFactors: ["MMA variance is high even for heavy favorites"],
     styleMatchup: null,
     upsetAnalysis: `${underdog} is the underdog at ${dogOdds} (~${100 - favPct}% implied). Full style analysis unavailable — manual research recommended before fading the market.`,
+    sherdogUsed: { fighterA: false, fighterB: false },
     commonOpponents: [],
     fighterAProfile: { name: fighterA, style: "Fighter", strengths: [], weaknesses: [], recentForm: [] },
     fighterBProfile: { name: fighterB, style: "Fighter", strengths: [], weaknesses: [], recentForm: [] },

@@ -69,13 +69,26 @@ function writeCache(name: string, data: SherdogFighterData): void {
   }
 }
 
-async function get(url: string): Promise<string> {
-  const res = await axios.get<string>(url, {
-    headers: { "User-Agent": UA, Accept: "text/html" },
-    timeout: 12000,
-    responseType: "text",
-  });
-  return res.data;
+/** Fetch a URL with exponential-backoff retry (item 7: rate limit / transient error resilience) */
+async function get(url: string, retries = 2): Promise<string> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await axios.get<string>(url, {
+        headers: { "User-Agent": UA, Accept: "text/html" },
+        timeout: 12000,
+        responseType: "text",
+      });
+      return res.data;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < retries) {
+        const delay = 1000 * Math.pow(2, attempt); // 1s, 2s
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+  }
+  throw lastErr;
 }
 
 /** Search Sherdog for a fighter, return their profile URL slug (e.g. /fighter/Dricus-Du-Plessis-146193) */

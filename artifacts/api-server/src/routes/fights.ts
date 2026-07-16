@@ -94,6 +94,8 @@ router.get("/fights/:fightId/analysis", async (req, res) => {
       },
       styleMatchup: analysis.styleMatchup ?? null,
       upsetAnalysis: analysis.upsetAnalysis ?? null,
+      /** item 3: true when real Sherdog records were fetched; false = AI used internal training knowledge */
+      sherdogUsed: analysis.sherdogUsed ?? { fighterA: false, fighterB: false },
       sources: [
         { label: "Replit AI", url: "https://replit.com" },
         { label: "The Odds API", url: "https://the-odds-api.com" },

@@ -29,6 +29,7 @@ interface RichAnalysis {
   };
   styleMatchup?: string | null;
   upsetAnalysis?: string | null;
+  sherdogUsed?: { fighterA: boolean; fighterB: boolean };
   sources?: Array<{ label: string; url: string }>;
 }
 
@@ -129,6 +130,21 @@ export function FightRow({ fight }: { fight: FightCard }) {
             </div>
           ) : analysis ? (
             <div className="p-4 sm:p-6 space-y-6 sm:space-y-8 text-sm">
+
+              {/* item 3: Sherdog disclaimer — shown when real records weren't available */}
+              {analysis.sherdogUsed && (!analysis.sherdogUsed.fighterA || !analysis.sherdogUsed.fighterB) && (
+                <div className="flex items-start gap-2 bg-amber-950/30 border border-amber-700/30 rounded-md px-3 py-2.5 text-amber-300/80 text-xs font-mono">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-500" />
+                  <span>
+                    Sherdog records unavailable for{' '}
+                    {[
+                      !analysis.sherdogUsed.fighterA && analysis.fighterA.name,
+                      !analysis.sherdogUsed.fighterB && analysis.fighterB.name,
+                    ].filter(Boolean).join(' and ')}
+                    . Analysis based on AI training knowledge — verify independently.
+                  </span>
+                </div>
+              )}
 
               {/* Verdict */}
               <section>

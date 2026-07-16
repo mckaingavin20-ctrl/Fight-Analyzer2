@@ -16,10 +16,12 @@ export default function Analyzer() {
     }
   }, [events, selectedEventId]);
 
+  // item 8: 5-minute stale time for event card so odds refresh frequently
   const { data: eventCard, isLoading: isLoadingCard } = useGetEventCard(selectedEventId, {
     query: {
       enabled: !!selectedEventId,
       queryKey: getGetEventCardQueryKey(selectedEventId),
+      staleTime: 1000 * 60 * 5,
     }
   });
 

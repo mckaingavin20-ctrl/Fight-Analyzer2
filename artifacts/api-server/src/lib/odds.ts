@@ -35,6 +35,15 @@ function normalizeName(n: string): string {
   return n.toLowerCase().replace(/[^a-z]/g, "");
 }
 
+/**
+ * Fuzzy fighter-name similarity after normalization (item 4).
+ * Both names are lowercased and stripped of non-alpha characters, then compared:
+ *   1.0  — exact match after normalization
+ *   0.85 — one name is a substring of the other (handles "Islam Makhachev" vs "Makhachev")
+ *   0.80 — last 7 chars match (handles suffix/suffix-only API differences)
+ *   0.0  — no match
+ * A threshold of ≥ 0.75 is used when matching ESPN names to Odds API names.
+ */
 export function nameSimilarity(a: string, b: string): number {
   const na = normalizeName(a);
   const nb = normalizeName(b);
@@ -57,13 +66,25 @@ export async function fetchAllOddsFights(): Promise<OddsFight[]> {
     return [];
   }
 
-  const res = await axios.get<OddsApiEvent[]>(
-    `${ODDS_API_BASE}/sports/mma_mixed_martial_arts/odds`,
-    {
-      params: { apiKey, regions: "us,uk", markets: "h2h", oddsFormat: "decimal" },
-      timeout: 12000,
+  // item 7: retry up to 2 times with backoff (free tier: ~500 req/day; deduplicated by in-memory cache)
+  let res: Awaited<ReturnType<typeof axios.get<OddsApiEvent[]>>>;
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= 2; attempt++) {
+    try {
+      res = await axios.get<OddsApiEvent[]>(
+        `${ODDS_API_BASE}/sports/mma_mixed_martial_arts/odds`,
+        {
+          params: { apiKey, regions: "us,uk", markets: "h2h", oddsFormat: "decimal" },
+          timeout: 12000,
+        }
+      );
+      break;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < 2) await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
     }
-  );
+  }
+  if (!res!) throw lastErr;
 
   const fights: OddsFight[] = res.data.map((ev) => {
     // Pick the first bookmaker with h2h market
