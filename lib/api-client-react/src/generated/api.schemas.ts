@@ -13,6 +13,27 @@ export interface ApiError {
   error: string;
 }
 
+export interface PickEntry {
+  fightId: string;
+  matchup: string;
+  eventDate: string;
+  fighterPicked: string;
+  opponent: string;
+  confidence: string;
+  pickedAt: string;
+  result: 'win' | 'loss' | 'pending';
+  resolvedAt?: string;
+}
+
+export interface PicksRecord {
+  picks: PickEntry[];
+  wins: number;
+  losses: number;
+  pending: number;
+  /** null until at least one fight resolves */
+  pct: number | null;
+}
+
 export interface UfcEvent {
   id: string;
   name: string;

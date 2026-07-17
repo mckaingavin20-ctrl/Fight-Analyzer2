@@ -4,6 +4,7 @@ import { logger } from "./logger.js";
 import type { OddsFight } from "./odds.js";
 import { decimalToAmerican, trueProbs } from "./odds.js";
 import { getFighterData, formatSherdogContext } from "./sherdog.js";
+import { recordPick } from "./picks-tracker.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -341,6 +342,17 @@ async function callAI(fight: OddsFight, weightClass: string): Promise<DeepAnalys
   }
 
   writeDiskCache(fight.id, parsed);
+
+  // Record this pick in the tracker (no-op if already recorded)
+  recordPick(
+    fight.id,
+    fight.fighterA,
+    fight.fighterB,
+    fight.commenceTime,
+    parsed.fighter,
+    parsed.confidence
+  );
+
   logger.info(
     {
       fightId: fight.id,

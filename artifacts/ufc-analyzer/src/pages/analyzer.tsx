@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useListEvents, useGetEventCard, getGetEventCardQueryKey } from '@workspace/api-client-react';
+import { useListEvents, useGetEventCard, useGetRecord, getGetEventCardQueryKey } from '@workspace/api-client-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Calendar, MapPin, Loader2, ChevronDown } from 'lucide-react';
 import { FightRow } from '@/components/fight-row';
@@ -9,6 +9,7 @@ export default function Analyzer() {
   const [selectedEventId, setSelectedEventId] = useState<string>('');
 
   const { data: events, isLoading: isLoadingEvents } = useListEvents();
+  const { data: record } = useGetRecord({ query: { staleTime: 1000 * 60 * 5 } });
 
   useEffect(() => {
     if (events && events.length > 0 && !selectedEventId) {
@@ -53,15 +54,41 @@ export default function Analyzer() {
               </p>
             </div>
 
-            {/* Live indicator */}
-            <div className="flex items-center gap-2 self-start sm:self-auto">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
-              </span>
-              <span className="text-[10px] font-mono uppercase tracking-widest text-green-400/70">
-                Live Odds
-              </span>
+            {/* Right side: record + live indicator */}
+            <div className="flex items-center gap-3 self-start sm:self-auto">
+              {/* W-L Record badge */}
+              {record && (record.wins > 0 || record.losses > 0) && (
+                <div
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg border font-mono text-[11px]"
+                  style={{ background: 'rgba(34,230,110,0.05)', borderColor: 'rgba(34,230,110,0.2)' }}
+                >
+                  <span style={{ color: '#22e66e' }} className="font-black">
+                    {record.wins}W–{record.losses}L
+                  </span>
+                  {record.pct !== null && (
+                    <span className="text-white/40">·</span>
+                  )}
+                  {record.pct !== null && (
+                    <span
+                      className="font-bold"
+                      style={{ color: record.pct >= 60 ? '#22e66e' : record.pct >= 50 ? '#fbbf24' : '#f87171' }}
+                    >
+                      {record.pct}%
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* Live indicator */}
+              <div className="flex items-center gap-2">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+                </span>
+                <span className="text-[10px] font-mono uppercase tracking-widest text-green-400/70">
+                  Live Odds
+                </span>
+              </div>
             </div>
           </div>
 

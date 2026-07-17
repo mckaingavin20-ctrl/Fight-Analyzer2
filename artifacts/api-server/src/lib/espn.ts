@@ -165,6 +165,62 @@ export async function getEspnEventCard(
   return bouts;
 }
 
+/**
+ * Fetch completed bout results for a past event date.
+ * Returns array of { fighterA, fighterB, winner } — winner is null if fight not yet completed.
+ */
+export async function getEspnBoutResults(
+  eventDate: string
+): Promise<Array<{ fighterA: string; fighterB: string; winner: string | null }>> {
+  const d = new Date(eventDate);
+  const dayBefore = new Date(d.getTime() - 24 * 60 * 60 * 1000);
+  const dates = Array.from(new Set([dateStr(dayBefore), dateStr(d)]));
+
+  interface EspnCompetitorFull {
+    id: string;
+    displayName: string;
+    homeAway: string;
+    winner?: boolean;
+  }
+  interface EspnBoutRaw {
+    uid: string;
+    date: string;
+    competitors: EspnCompetitorFull[];
+  }
+  interface EspnEventsResponse {
+    events?: EspnBoutRaw[];
+  }
+
+  const seen = new Set<string>();
+  const results: Array<{ fighterA: string; fighterB: string; winner: string | null }> = [];
+
+  for (const dateParam of dates) {
+    try {
+      const res = await axios.get<EspnEventsResponse>(`${ESPN_BASE}/events`, {
+        params: { dates: dateParam },
+        timeout: 12000,
+      });
+      for (const b of res.data.events ?? []) {
+        if (seen.has(b.uid)) continue;
+        seen.add(b.uid);
+        const home = b.competitors.find((c) => c.homeAway === "home") ?? b.competitors[0];
+        const away = b.competitors.find((c) => c.homeAway === "away") ?? b.competitors[1];
+        if (!home || !away) continue;
+        const winner = b.competitors.find((c) => c.winner === true);
+        results.push({
+          fighterA: home.displayName,
+          fighterB: away.displayName,
+          winner: winner?.displayName ?? null,
+        });
+      }
+    } catch (err) {
+      logger.warn({ err, dateParam }, "ESPN results fetch failed for date");
+    }
+  }
+
+  return results;
+}
+
 export function eventDateWindow(
   eventDate: string
 ): { from: Date; to: Date } {

@@ -1,11 +1,71 @@
 import cron from "node-cron";
 import { logger } from "./logger.js";
-import { getUpcomingEspnEvents, getEspnEventCard, eventDateWindow, clearEspnCaches } from "./espn.js";
+import { getUpcomingEspnEvents, getEspnEventCard, getEspnBoutResults, eventDateWindow, clearEspnCaches } from "./espn.js";
 import { fetchAllOddsFights } from "./odds.js";
 import { batchGenerateAnalyses, clearDiskCache } from "./ai-analyzer.js";
+import { getPendingResolvedNeeded, resolvePickResult } from "./picks-tracker.js";
 import type { OddsFight } from "./odds.js";
 
 let isRunning = false;
+
+/** Fuzzy name match — strips non-alpha and compares */
+function nameSim(a: string, b: string): boolean {
+  const n = (s: string) => s.toLowerCase().replace(/[^a-z]/g, "");
+  const na = n(a), nb = n(b);
+  return na === nb || na.includes(nb) || nb.includes(na);
+}
+
+/** Check ESPN results for all pending picks whose event time has passed. */
+async function resolveCompletedPicks(): Promise<void> {
+  const pending = getPendingResolvedNeeded();
+  if (pending.length === 0) {
+    logger.info("No pending picks to resolve");
+    return;
+  }
+
+  logger.info({ count: pending.length }, "Resolving completed picks");
+
+  // Group by event date to minimise ESPN API calls
+  const byDate = new Map<string, typeof pending>();
+  for (const pick of pending) {
+    const key = pick.eventDate.slice(0, 10); // YYYY-MM-DD
+    if (!byDate.has(key)) byDate.set(key, []);
+    byDate.get(key)!.push(pick);
+  }
+
+  for (const [, picks] of byDate) {
+    const eventDate = picks[0].eventDate;
+    let bouts: Awaited<ReturnType<typeof getEspnBoutResults>>;
+    try {
+      bouts = await getEspnBoutResults(eventDate);
+    } catch (err) {
+      logger.warn({ err, eventDate }, "Failed to fetch ESPN results for date");
+      continue;
+    }
+
+    for (const pick of picks) {
+      // Find the ESPN bout that matches this fight's two fighters
+      const bout = bouts.find(
+        (b) =>
+          (nameSim(b.fighterA, pick.fighterPicked) && nameSim(b.fighterB, pick.opponent)) ||
+          (nameSim(b.fighterB, pick.fighterPicked) && nameSim(b.fighterA, pick.opponent))
+      );
+
+      if (!bout) {
+        logger.info({ fightId: pick.fightId }, "No ESPN result yet for pick — will retry next refresh");
+        continue;
+      }
+
+      if (!bout.winner) {
+        logger.info({ fightId: pick.fightId }, "ESPN bout has no winner yet");
+        continue;
+      }
+
+      const won = nameSim(bout.winner, pick.fighterPicked);
+      resolvePickResult(pick.fightId, won ? "win" : "loss");
+    }
+  }
+}
 
 async function runDailyRefresh(): Promise<void> {
   if (isRunning) {
@@ -78,6 +138,10 @@ async function runDailyRefresh(): Promise<void> {
     const unique = [...fightMap.values()];
     logger.info({ count: unique.length }, "Daily refresh: pre-generating analyses");
     await batchGenerateAnalyses(unique);
+
+    // ── Resolve results for past picks ────────────────────────────────
+    await resolveCompletedPicks();
+
     logger.info("Daily refresh complete");
   } catch (err) {
     logger.error({ err }, "Daily refresh failed");

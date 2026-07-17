@@ -20,6 +20,7 @@ import type {
   EventCard,
   FightAnalysis,
   HealthStatus,
+  PicksRecord,
   UfcEvent
 } from './api.schemas';
 
@@ -338,6 +339,38 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 
 export type GetFightAnalysisQueryResult = NonNullable<Awaited<ReturnType<typeof getFightAnalysis>>>
 export type GetFightAnalysisQueryError = ErrorType<ApiError>
+
+// ── Picks Record ───────────────────────────────────────────────────────
+
+export const getGetRecordUrl = () => `/api/record`;
+
+export const getRecord = async (options?: RequestInit): Promise<PicksRecord> =>
+  customFetch<PicksRecord>(getGetRecordUrl(), { ...options, method: 'GET' });
+
+export const getGetRecordQueryKey = () => [`/api/record`] as const;
+
+export const getGetRecordQueryOptions = <
+  TData = Awaited<ReturnType<typeof getRecord>>,
+  TError = ErrorType<ApiError>
+>(options?: { query?: UseQueryOptions<Awaited<ReturnType<typeof getRecord>>, TError, TData>; request?: SecondParameter<typeof customFetch> }) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+  const queryKey = queryOptions?.queryKey ?? getGetRecordQueryKey();
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getRecord>>> = ({ signal }) =>
+    getRecord({ signal, ...requestOptions });
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<Awaited<ReturnType<typeof getRecord>>, TError, TData> & { queryKey: QueryKey };
+};
+
+export type GetRecordQueryResult = NonNullable<Awaited<ReturnType<typeof getRecord>>>;
+export type GetRecordQueryError = ErrorType<ApiError>;
+
+export function useGetRecord<
+  TData = Awaited<ReturnType<typeof getRecord>>,
+  TError = ErrorType<ApiError>
+>(options?: { query?: UseQueryOptions<Awaited<ReturnType<typeof getRecord>>, TError, TData>; request?: SecondParameter<typeof customFetch> }): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetRecordQueryOptions(options);
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & { queryKey: QueryKey };
+  return withQueryKey(query, queryOptions.queryKey);
+}
 
 
 /**
