@@ -36,6 +36,10 @@ export interface DeepAnalysis {
     strengths: string[];
     weaknesses: string[];
     recentForm: string[];
+    radarMetrics?: {
+      striking: number; grappling: number; cardio: number;
+      chin: number; power: number; defense: number;
+    };
   };
   fighterBProfile: {
     name: string;
@@ -43,6 +47,10 @@ export interface DeepAnalysis {
     strengths: string[];
     weaknesses: string[];
     recentForm: string[];
+    radarMetrics?: {
+      striking: number; grappling: number; cardio: number;
+      chin: number; power: number; defense: number;
+    };
   };
 }
 
@@ -208,14 +216,16 @@ Required JSON structure:
     "style": "<primary style, e.g. 'Orthodox Pressure Kickboxer | MMA Grappler'>",
     "strengths": ["<specific strength backed by their Sherdog record>", "<another>", "<another>"],
     "weaknesses": ["<weakness visible in their losses or close fights>", "<another>"],
-    "recentForm": ["W", "L", "W", "W", "L"]
+    "recentForm": ["W", "L", "W", "W", "L"],
+    "radarMetrics": { "striking": 7, "grappling": 6, "cardio": 8, "chin": 7, "power": 9, "defense": 6 }
   },
   "fighterBProfile": {
     "name": "${fighterB}",
     "style": "<primary style>",
     "strengths": ["<strength>", "<strength>", "<strength>"],
     "weaknesses": ["<weakness>", "<weakness>"],
-    "recentForm": ["W", "W", "W", "L", "W"]
+    "recentForm": ["W", "W", "W", "L", "W"],
+    "radarMetrics": { "striking": 8, "grappling": 5, "cardio": 7, "chin": 6, "power": 7, "defense": 8 }
   }
 }
 
