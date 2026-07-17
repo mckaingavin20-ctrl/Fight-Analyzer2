@@ -21,6 +21,8 @@ export interface UfcEvent {
   venue?: string | null;
   /** @nullable */
   location?: string | null;
+  /** Whether odds are currently available for this event */
+  hasOdds?: boolean;
 }
 
 export interface FighterSummary {

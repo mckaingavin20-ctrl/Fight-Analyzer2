@@ -94,6 +94,12 @@ export default function Analyzer() {
                     <span className="text-muted-foreground ml-2 text-xs">
                       {new Date(event.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                     </span>
+                    {event.hasOdds === false && (
+                      <span className="ml-2 text-[9px] font-mono uppercase tracking-widest px-1.5 py-0.5 rounded"
+                        style={{ background: 'rgba(251,191,36,0.12)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.2)' }}>
+                        Odds TBD
+                      </span>
+                    )}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -163,11 +169,24 @@ export default function Analyzer() {
             </div>
 
             {/* Fight cards */}
-            <div className="space-y-3 sm:space-y-4">
-              {eventCard.fights.map((fight) => (
-                <FightRow key={fight.id} fight={fight} />
-              ))}
-            </div>
+            {eventCard.fights.length === 0 ? (
+              <div
+                className="rounded-2xl border px-6 py-12 text-center font-mono"
+                style={{ background: 'rgba(255,255,255,0.02)', borderColor: 'rgba(255,255,255,0.06)' }}
+              >
+                <div className="text-3xl mb-4">📋</div>
+                <p className="font-bold uppercase tracking-widest text-sm mb-2">Card Not Announced Yet</p>
+                <p className="text-xs text-muted-foreground/50 max-w-xs mx-auto">
+                  The full fight card for this event hasn't been posted. Picks and odds will appear automatically once bookmakers open lines.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3 sm:space-y-4">
+                {eventCard.fights.map((fight) => (
+                  <FightRow key={fight.id} fight={fight} />
+                ))}
+              </div>
+            )}
 
             <p className="text-center text-[10px] font-mono text-muted-foreground/30 mt-8 pb-6 uppercase tracking-widest">
               Picks by Gavin · Odds via The Odds API · Updated daily

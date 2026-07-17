@@ -42,15 +42,16 @@ async function runDailyRefresh(): Promise<void> {
         return t >= from && t <= to;
       });
 
-      if (windowOdds.length === 0) continue; // no odds data → skip pre-gen
-
-      // Try ESPN card first
+      // Always warm the ESPN card cache — even for events with no odds yet
       let espnBouts: Awaited<ReturnType<typeof getEspnEventCard>> = [];
       try {
         espnBouts = await getEspnEventCard(ev.id, ev.date);
       } catch (err) {
         logger.warn({ err, eventId: ev.id }, "ESPN card fetch failed during refresh");
       }
+
+      // Only queue AI analysis when odds are available (needed for pick generation)
+      if (windowOdds.length === 0) continue;
 
       if (espnBouts.length > 0) {
         // Match ESPN bouts to Odds API fights for the fight ID

@@ -10,18 +10,18 @@ router.get("/events", async (_req, res) => {
     fetchAllOddsFights(),
   ]);
 
-  // Only surface events that have at least one fight announced.
-  // Fast check: use Odds API time-window (no ESPN card fetch needed per event).
-  const withFights = events.filter((ev) => {
+  // Tag each event with whether odds are available yet (used by the client to show "Odds TBD")
+  const tagged = events.map((ev) => {
     const { from, to } = eventDateWindow(ev.date);
-    return allOddsFights.some((f) => {
+    const hasOdds = allOddsFights.some((f) => {
       const t = new Date(f.commenceTime);
       return t >= from && t <= to;
     });
+    return { ...ev, hasOdds };
   });
 
-  // Return events that have odds coverage, or fall back to first 8 if none match
-  return res.json(withFights.length ? withFights.slice(0, 8) : events.slice(0, 8));
+  // Always return all known upcoming events (up to 8), sorted by date ascending
+  return res.json(tagged.slice(0, 8));
 });
 
 router.get("/events/:eventId/card", async (req, res) => {
