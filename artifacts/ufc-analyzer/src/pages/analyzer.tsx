@@ -1,129 +1,144 @@
 import { useState, useEffect } from 'react';
+import { useUser, useClerk } from '@clerk/react';
 import { useListEvents, useGetEventCard, useGetRecord, getGetEventCardQueryKey } from '@workspace/api-client-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Calendar, MapPin, Loader2, ChevronDown } from 'lucide-react';
+import { Calendar, MapPin, Loader2, LogOut, User } from 'lucide-react';
 import { FightRow } from '@/components/fight-row';
 import { Skeleton } from '@/components/ui/skeleton';
 
+const GREEN = '#22e66e';
+
 export default function Analyzer() {
   const [selectedEventId, setSelectedEventId] = useState<string>('');
+  const { user } = useUser();
+  const { signOut } = useClerk();
 
   const { data: events, isLoading: isLoadingEvents } = useListEvents();
   const { data: record } = useGetRecord({ query: { staleTime: 1000 * 60 * 5 } });
 
+  // Auto-select first event with odds, then first event overall
   useEffect(() => {
-    if (events && events.length > 0 && !selectedEventId) {
-      setSelectedEventId(events[0].id);
-    }
+    if (!events?.length || selectedEventId) return;
+    const withOdds = events.find(e => e.hasOdds);
+    setSelectedEventId((withOdds ?? events[0]).id);
   }, [events, selectedEventId]);
+
+  const selectedEvent = events?.find(e => e.id === selectedEventId);
 
   const { data: eventCard, isLoading: isLoadingCard } = useGetEventCard(selectedEventId, {
     query: {
-      enabled: !!selectedEventId,
+      enabled: !!selectedEventId && !!selectedEvent?.hasOdds,
       queryKey: getGetEventCardQueryKey(selectedEventId),
       staleTime: 1000 * 60 * 5,
-    }
+    },
   });
 
+  const basePath = import.meta.env.BASE_URL.replace(/\/$/, '');
+
   return (
-    <div className="min-h-[100dvh] bg-background text-foreground">
+    <div
+      className="min-h-[100dvh] flex flex-col"
+      style={{ background: 'linear-gradient(180deg, #07070f 0%, #0a0a14 100%)' }}
+    >
+      {/* ── Header ───────────────────────────────────────────────────── */}
+      <header className="sticky top-0 z-40 border-b px-4 sm:px-6 py-3 flex items-center justify-between"
+        style={{ background: 'rgba(7,7,15,0.9)', backdropFilter: 'blur(12px)', borderColor: 'rgba(255,255,255,0.06)' }}>
 
-      {/* ── Header ───────────────────────────────────────────────── */}
-      <header
-        className="border-b border-white/5"
-        style={{ background: 'linear-gradient(180deg, #0a0a1a 0%, #0d0d1f 100%)' }}
-      >
-        <div className="max-w-5xl mx-auto px-4 py-4 sm:py-6">
-          {/* Brand row */}
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-            <div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-2xl sm:text-4xl font-black uppercase tracking-tight text-white">
-                  GAVIN'S
-                </span>
-                <span
-                  className="text-2xl sm:text-4xl font-black uppercase tracking-tight"
-                  style={{ color: '#22e66e' }}
-                >
-                  PICKS
-                </span>
-              </div>
-              <p className="text-[11px] sm:text-xs font-mono tracking-[0.2em] uppercase mt-1"
-                style={{ color: '#3a3a5c' }}>
-                UFC · FIGHT NIGHT ANALYSIS · OFFICIAL PICKS
-              </p>
-            </div>
+        {/* Brand */}
+        <div className="flex items-center gap-2.5 shrink-0">
+          <div className="w-7 h-7 rounded-md flex items-center justify-center font-black text-xs"
+            style={{ background: 'rgba(34,230,110,0.12)', color: GREEN, border: '1px solid rgba(34,230,110,0.25)' }}>
+            GP
+          </div>
+          <span className="font-black uppercase tracking-widest text-sm text-white hidden sm:block">
+            Gavin's <span style={{ color: GREEN }}>Picks™</span>
+          </span>
+        </div>
 
-            {/* Right side: record + live indicator */}
-            <div className="flex items-center gap-3 self-start sm:self-auto">
-              {/* W-L Record badge */}
-              {record && (record.wins > 0 || record.losses > 0) && (
-                <div
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg border font-mono text-[11px]"
-                  style={{ background: 'rgba(34,230,110,0.05)', borderColor: 'rgba(34,230,110,0.2)' }}
-                >
-                  <span style={{ color: '#22e66e' }} className="font-black">
-                    {record.wins}W–{record.losses}L
+        {/* Right: record + live + user */}
+        <div className="flex items-center gap-3">
+          {/* W-L Record badge */}
+          {record && (record.wins > 0 || record.losses > 0) && (
+            <div
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg border font-mono text-[11px]"
+              style={{ background: 'rgba(34,230,110,0.05)', borderColor: 'rgba(34,230,110,0.2)' }}
+            >
+              <span style={{ color: GREEN }} className="font-black">
+                {record.wins}W–{record.losses}L
+              </span>
+              {record.pct !== null && (
+                <>
+                  <span className="text-white/30">·</span>
+                  <span
+                    className="font-bold"
+                    style={{ color: record.pct >= 60 ? GREEN : record.pct >= 50 ? '#fbbf24' : '#f87171' }}
+                  >
+                    {record.pct}%
                   </span>
-                  {record.pct !== null && (
-                    <span className="text-white/40">·</span>
-                  )}
-                  {record.pct !== null && (
-                    <span
-                      className="font-bold"
-                      style={{ color: record.pct >= 60 ? '#22e66e' : record.pct >= 50 ? '#fbbf24' : '#f87171' }}
-                    >
-                      {record.pct}%
-                    </span>
-                  )}
-                </div>
+                </>
               )}
-
-              {/* Live indicator */}
-              <div className="flex items-center gap-2">
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
-                </span>
-                <span className="text-[10px] font-mono uppercase tracking-widest text-green-400/70">
-                  Live Odds
-                </span>
-              </div>
             </div>
+          )}
+
+          {/* Live indicator */}
+          <div className="flex items-center gap-2">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+            </span>
+            <span className="text-[10px] font-mono uppercase tracking-widest text-green-400/70 hidden sm:block">
+              Live Odds
+            </span>
           </div>
 
-          {/* Event selector */}
-          <div className="relative">
-            <Select
-              value={selectedEventId}
-              onValueChange={setSelectedEventId}
-              disabled={isLoadingEvents}
-            >
-              <SelectTrigger
-                className="w-full sm:w-80 text-sm border-white/10 bg-white/5 backdrop-blur"
-                style={{ borderRadius: '10px' }}
+          {/* User menu */}
+          {user && (
+            <div className="flex items-center gap-2 pl-3 border-l" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
+              <div className="flex items-center gap-1.5">
+                <div className="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-black"
+                  style={{ background: 'rgba(34,230,110,0.15)', color: GREEN }}>
+                  {(user.firstName?.[0] ?? user.emailAddresses?.[0]?.emailAddress?.[0] ?? '?').toUpperCase()}
+                </div>
+                <span className="text-[10px] font-mono text-white/40 hidden sm:block max-w-[100px] truncate">
+                  {user.firstName ?? user.emailAddresses?.[0]?.emailAddress?.split('@')[0]}
+                </span>
+              </div>
+              <button
+                onClick={() => signOut({ redirectUrl: basePath || '/' })}
+                className="p-1.5 rounded-lg hover:bg-white/5 transition-colors"
+                title="Sign out"
               >
-                {isLoadingEvents ? (
-                  <span className="text-muted-foreground flex items-center gap-2">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading events…
-                  </span>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <ChevronDown className="w-3.5 h-3.5 text-green-400 shrink-0" />
-                    <SelectValue placeholder="Select an event" />
-                  </div>
-                )}
+                <LogOut className="w-3.5 h-3.5 text-white/30 hover:text-white/60" />
+              </button>
+            </div>
+          )}
+        </div>
+      </header>
+
+      {/* ── Main content ─────────────────────────────────────────────── */}
+      <main className="flex-1 w-full max-w-4xl mx-auto px-4 sm:px-6 py-6 space-y-5">
+
+        {/* Event selector */}
+        {isLoadingEvents ? (
+          <Skeleton className="h-14 w-full bg-white/5 rounded-xl" />
+        ) : (
+          <div className="rounded-xl border p-4 sm:p-5 space-y-3"
+            style={{ background: 'rgba(255,255,255,0.02)', borderColor: 'rgba(255,255,255,0.06)' }}>
+            <Select value={selectedEventId} onValueChange={setSelectedEventId}>
+              <SelectTrigger
+                className="w-full font-mono font-bold text-sm border-0 bg-transparent p-0 h-auto focus:ring-0 shadow-none"
+                style={{ color: GREEN }}
+              >
+                <SelectValue placeholder="Select an event…" />
               </SelectTrigger>
-              <SelectContent>
-                {events?.map((event) => (
-                  <SelectItem key={event.id} value={event.id}>
-                    <span className="font-semibold">{event.name}</span>
-                    <span className="text-muted-foreground ml-2 text-xs">
-                      {new Date(event.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                    </span>
-                    {event.hasOdds === false && (
-                      <span className="ml-2 text-[9px] font-mono uppercase tracking-widest px-1.5 py-0.5 rounded"
-                        style={{ background: 'rgba(251,191,36,0.12)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.2)' }}>
+              <SelectContent style={{ background: '#0f0f1e', borderColor: 'rgba(255,255,255,0.1)' }}>
+                {events?.map(ev => (
+                  <SelectItem key={ev.id} value={ev.id}
+                    className="font-mono font-bold text-sm cursor-pointer focus:bg-white/5">
+                    <span>{ev.name}</span>
+                    {!ev.hasOdds && (
+                      <span className="ml-2 text-[9px] font-mono uppercase tracking-widest px-1.5 py-0.5 rounded border"
+                        style={{ color: '#fbbf24', borderColor: 'rgba(251,191,36,0.3)', background: 'rgba(251,191,36,0.06)' }}>
                         Odds TBD
                       </span>
                     )}
@@ -131,105 +146,69 @@ export default function Analyzer() {
                 ))}
               </SelectContent>
             </Select>
-          </div>
-        </div>
-      </header>
 
-      {/* ── Main content ─────────────────────────────────────────── */}
-      <main className="max-w-5xl mx-auto px-3 sm:px-4 py-5 sm:py-8">
-
-        {/* Loading skeleton */}
-        {isLoadingCard && (
-          <div className="space-y-3">
-            <div className="flex items-center gap-3 mb-6">
-              <Loader2 className="w-4 h-4 text-primary animate-spin" />
-              <span className="font-mono text-xs text-muted-foreground uppercase tracking-widest">
-                Loading fight card…
-              </span>
-            </div>
-            {[...Array(5)].map((_, i) => (
-              <div key={i} className="bg-card border border-card-border rounded-2xl p-5 space-y-3">
-                <Skeleton className="h-3 w-20 bg-white/5" />
-                <div className="flex justify-between gap-4">
-                  <Skeleton className="h-20 w-20 rounded-full bg-white/5" />
-                  <Skeleton className="h-20 w-20 rounded-full bg-white/5" />
-                </div>
-                <Skeleton className="h-4 w-1/2 mx-auto bg-white/5" />
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Event card */}
-        {!isLoadingCard && eventCard && (
-          <div>
-            {/* Event meta strip */}
-            <div
-              className="mb-5 rounded-xl px-4 py-3 border border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
-              style={{ background: 'rgba(255,255,255,0.02)' }}
-            >
-              <div>
-                <h2 className="font-black uppercase tracking-tight text-sm sm:text-base">
-                  {eventCard.name}
-                </h2>
-                <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-[11px] font-mono text-muted-foreground mt-1">
-                  <span className="flex items-center gap-1">
+            {selectedEvent && (
+              <div className="flex flex-wrap items-center gap-3 text-[10px] font-mono text-muted-foreground">
+                {selectedEvent.date && (
+                  <span className="flex items-center gap-1.5">
                     <Calendar className="w-3 h-3" />
-                    {new Date(eventCard.date).toLocaleDateString('en-US', {
-                      weekday: 'long', month: 'long', day: 'numeric', year: 'numeric'
-                    })}
+                    {new Date(selectedEvent.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
                   </span>
-                  {(eventCard.venue || eventCard.location) && (
-                    <span className="flex items-center gap-1">
-                      <MapPin className="w-3 h-3" />
-                      {[eventCard.venue, eventCard.location].filter(Boolean).join(' · ')}
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div
-                className="text-[11px] font-mono uppercase tracking-widest px-3 py-1.5 rounded-lg self-start sm:self-auto whitespace-nowrap border"
-                style={{ color: '#22e66e', borderColor: 'rgba(34,230,110,0.2)', background: 'rgba(34,230,110,0.05)' }}
-              >
-                {eventCard.fights.length} fights on card
-              </div>
-            </div>
-
-            {/* Fight cards */}
-            {eventCard.fights.length === 0 ? (
-              <div
-                className="rounded-2xl border px-6 py-12 text-center font-mono"
-                style={{ background: 'rgba(255,255,255,0.02)', borderColor: 'rgba(255,255,255,0.06)' }}
-              >
-                <div className="text-3xl mb-4">📋</div>
-                <p className="font-bold uppercase tracking-widest text-sm mb-2">Card Not Announced Yet</p>
-                <p className="text-xs text-muted-foreground/50 max-w-xs mx-auto">
-                  The full fight card for this event hasn't been posted. Picks and odds will appear automatically once bookmakers open lines.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3 sm:space-y-4">
-                {eventCard.fights.map((fight) => (
-                  <FightRow key={fight.id} fight={fight} />
-                ))}
+                )}
+                {selectedEvent.location && (
+                  <span className="flex items-center gap-1.5">
+                    <MapPin className="w-3 h-3" />
+                    {selectedEvent.location}
+                  </span>
+                )}
+                {!selectedEvent.hasOdds && (
+                  <span className="px-2 py-0.5 rounded border text-[9px] font-black uppercase tracking-widest"
+                    style={{ color: '#fbbf24', borderColor: 'rgba(251,191,36,0.3)', background: 'rgba(251,191,36,0.06)' }}>
+                    Odds not yet available
+                  </span>
+                )}
               </div>
             )}
-
-            <p className="text-center text-[10px] font-mono text-muted-foreground/30 mt-8 pb-6 uppercase tracking-widest">
-              Picks by Gavin · Odds via The Odds API · Updated daily
-            </p>
           </div>
         )}
 
-        {/* Empty state */}
-        {!isLoadingCard && !isLoadingEvents && !eventCard && events && events.length === 0 && (
-          <div className="text-center py-24 text-muted-foreground font-mono">
-            <div className="text-4xl mb-4">🥊</div>
-            <p className="font-bold uppercase tracking-widest">No upcoming events found.</p>
-            <p className="text-xs mt-2 opacity-50">Check back closer to the next fight night.</p>
+        {/* Fight cards */}
+        {!selectedEvent?.hasOdds ? (
+          <div className="rounded-2xl border p-12 text-center"
+            style={{ borderColor: 'rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.01)' }}>
+            <p className="text-2xl mb-3">🥊</p>
+            <p className="font-black uppercase tracking-tight text-white mb-2">Card Not Announced Yet</p>
+            <p className="text-xs font-mono text-muted-foreground">
+              Odds will appear here once the card is officially announced and lines open.
+            </p>
+          </div>
+        ) : isLoadingCard ? (
+          <div className="space-y-4">
+            {[...Array(5)].map((_, i) => (
+              <Skeleton key={i} className="h-28 w-full bg-white/5 rounded-2xl" />
+            ))}
+          </div>
+        ) : eventCard?.fights?.length ? (
+          <div className="space-y-3">
+            {eventCard.fights.map(fight => (
+              <FightRow key={fight.id} fight={fight} />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-2xl border p-12 text-center"
+            style={{ borderColor: 'rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.01)' }}>
+            <p className="font-mono text-muted-foreground">No fights found for this event.</p>
           </div>
         )}
       </main>
+
+      {/* ── Footer ───────────────────────────────────────────────────── */}
+      <footer className="border-t px-4 sm:px-6 py-5 text-center"
+        style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
+        <p className="text-[10px] font-mono text-white/20">
+          © {new Date().getFullYear()} Gavin's Picks™ · For entertainment purposes only · Please gamble responsibly
+        </p>
+      </footer>
     </div>
   );
 }
