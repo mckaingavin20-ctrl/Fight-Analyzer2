@@ -4,6 +4,7 @@ import { logger } from "./logger.js";
 import type { OddsFight } from "./odds.js";
 import { decimalToAmerican, trueProbs } from "./odds.js";
 import { getFighterData, formatSherdogContext } from "./sherdog.js";
+import { getFighterStats, formatUfcStatsContext } from "./ufcstats.js";
 import { recordPick } from "./picks-tracker.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -111,6 +112,15 @@ YOUR CORE ANALYTICAL RULES:
 3. If the underdog's style genuinely exploits the favorite's known weaknesses, PICK THE UNDERDOG.
 4. The favorite's loss record is your most important clue. If they've been beaten in the same way the underdog fights, that is a red flag.
 5. Use the Sherdog fight records as ground truth for results and methods.
+6. Use UFC official career stats (SLpM, Str.Def, TD Def, etc.) as quantitative evidence — not just vibes.
+   - SLpM (strikes landed/min): measures offensive output. Elite UFC average ≈ 3.5. High = volume striker.
+   - Str.Acc %: precision of landing. <44% = wild; >55% = surgical.
+   - SApM (strikes absorbed/min): how much punishment they eat. High = chin concerns or passive defense.
+   - Str.Def %: how often they avoid shots. >60% = elite; <50% = vulnerability.
+   - TD Avg (per 15 min): grappling aggression. >3 = high-output wrestler.
+   - TD Def %: how often they stop takedowns. >80% = elite; <60% = exploitable.
+   - Sub Avg (per 15 min): submission threat. >1 = active submission game.
+   When you have these stats for both fighters, compare them directly in your analysis.
 
 Respond ONLY with valid JSON. No markdown, no code fences, no prose outside the JSON.`;
 
@@ -126,11 +136,26 @@ function buildPrompt(
   favImpliedPct: number,
   dogImpliedPct: number,
   sherdogA: string | null,
-  sherdogB: string | null
+  sherdogB: string | null,
+  ufcStatsA: string | null,
+  ufcStatsB: string | null
 ): string {
 
+  // UFCStats block (official quantitative stats)
+  const ufcStatsBlock = (ufcStatsA || ufcStatsB)
+    ? [
+        "\n=== UFC OFFICIAL CAREER STATS (ufcstats.com) ===",
+        `\n--- ${fighterA} ---`,
+        ufcStatsA ?? "No UFC stats available — rely on training knowledge.",
+        `\n--- ${fighterB} ---`,
+        ufcStatsB ?? "No UFC stats available — rely on training knowledge.",
+        "=== END UFC STATS ===\n",
+      ].join("\n")
+    : "";
+
   const dataBlock = [
-    "=== VERIFIED FIGHT RECORD DATA (SHERDOG) ===",
+    ufcStatsBlock,
+    "=== FIGHT RECORD DATA (SHERDOG) ===",
     `\n--- ${fighterA} ---`,
     sherdogA ?? "No Sherdog data — use your training knowledge for this fighter.",
     `\n--- ${fighterB} ---`,
@@ -265,15 +290,17 @@ async function callAI(fight: OddsFight, weightClass: string): Promise<DeepAnalys
     dogImpliedPct = 100 - favImpliedPct;
   }
 
-  // Fetch Sherdog data for both fighters in parallel
+  // Fetch Sherdog + UFCStats in parallel for both fighters
   logger.info(
     { fighterA: fight.fighterA, fighterB: fight.fighterB, favorite, underdog },
-    "Fetching Sherdog data — favorite/underdog identified"
+    "Fetching fighter data (Sherdog + UFCStats) — favorite/underdog identified"
   );
 
-  const [dataA, dataB] = await Promise.allSettled([
+  const [dataA, dataB, statsA, statsB] = await Promise.allSettled([
     getFighterData(fight.fighterA),
     getFighterData(fight.fighterB),
+    getFighterStats(fight.fighterA),
+    getFighterStats(fight.fighterB),
   ]);
 
   const sherdogA = dataA.status === "fulfilled" && dataA.value
@@ -281,10 +308,19 @@ async function callAI(fight: OddsFight, weightClass: string): Promise<DeepAnalys
   const sherdogB = dataB.status === "fulfilled" && dataB.value
     ? formatSherdogContext(dataB.value) : null;
 
+  const ufcStatsA = statsA.status === "fulfilled" && statsA.value
+    ? formatUfcStatsContext(statsA.value) : null;
+  const ufcStatsB = statsB.status === "fulfilled" && statsB.value
+    ? formatUfcStatsContext(statsB.value) : null;
+
   if (sherdogA) logger.info({ fighter: fight.fighterA }, "Sherdog data included");
-  else logger.warn({ fighter: fight.fighterA }, "No Sherdog data — AI using training knowledge");
+  else logger.warn({ fighter: fight.fighterA }, "No Sherdog data");
+  if (ufcStatsA) logger.info({ fighter: fight.fighterA }, "UFCStats data included");
+  else logger.warn({ fighter: fight.fighterA }, "No UFCStats data");
   if (sherdogB) logger.info({ fighter: fight.fighterB }, "Sherdog data included");
-  else logger.warn({ fighter: fight.fighterB }, "No Sherdog data — AI using training knowledge");
+  else logger.warn({ fighter: fight.fighterB }, "No Sherdog data");
+  if (ufcStatsB) logger.info({ fighter: fight.fighterB }, "UFCStats data included");
+  else logger.warn({ fighter: fight.fighterB }, "No UFCStats data");
 
   logger.info(
     { fightId: fight.id, fighterA: fight.fighterA, fighterB: fight.fighterB },
@@ -309,7 +345,9 @@ async function callAI(fight: OddsFight, weightClass: string): Promise<DeepAnalys
           favImpliedPct,
           dogImpliedPct,
           sherdogA,
-          sherdogB
+          sherdogB,
+          ufcStatsA,
+          ufcStatsB
         ),
       },
     ],
