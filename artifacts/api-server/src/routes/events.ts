@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { getUpcomingEspnEvents, getEspnEventCard, eventDateWindow } from "../lib/espn.js";
 import { fetchAllOddsFights, nameSimilarity } from "../lib/odds.js";
+import { getPicksStats } from "../lib/picks-tracker.js";
 
 const router = Router();
 
@@ -57,6 +58,37 @@ router.get("/events/:eventId/card", async (req, res) => {
     return best;
   }
 
+  // Build pick result map for enriching each fight card
+  const { picks } = getPicksStats();
+  const pickMap = new Map(picks.map((p) => [p.fightId, p]));
+
+  // Fuzzy name match — strips non-alpha for comparison
+  const normName = (s: string) => s.toLowerCase().replace(/[^a-z]/g, "");
+  const nameSim = (a: string, b: string) => {
+    const na = normName(a), nb = normName(b);
+    return na === nb || na.includes(nb) || nb.includes(na);
+  };
+
+  function enrichWithPick(fightId: string, nameA: string, nameB: string) {
+    // 1. Exact fight-ID match (live fights still in odds feed)
+    let pick = pickMap.get(fightId);
+
+    // 2. Name-based fallback (completed fights — odds gone, ESPN UID used as ID)
+    if (!pick) {
+      pick = picks.find((p) =>
+        (nameSim(p.fighterPicked, nameA) && nameSim(p.opponent, nameB)) ||
+        (nameSim(p.fighterPicked, nameB) && nameSim(p.opponent, nameA))
+      );
+    }
+
+    if (!pick) return {};
+    const winner =
+      pick.result === "win" ? pick.fighterPicked
+      : pick.result === "loss" ? pick.opponent
+      : null;
+    return { pickResult: pick.result, pickWinner: winner, gpPick: pick.fighterPicked };
+  }
+
   if (espnBouts.length > 0) {
     // Sort: later timestamp first, then reverse ESPN order within same timestamp
     // so main event (last in ESPN) ends up at index 0
@@ -68,14 +100,16 @@ router.get("/events/:eventId/card", async (req, res) => {
 
     const fights = sorted.map((bout, i) => {
       const odds = findOddsMatch(bout.fighterA.name, bout.fighterB.name);
+      const fightId = odds?.id ?? bout.boutUid;
       return {
-        id: odds?.id ?? bout.boutUid,
+        id: fightId,
         weightClass: "MMA",
         order: i,
         isMain: i === 0,
         fighterA: { name: bout.fighterA.name, record: "–", ufcStatsId: null, espnId: bout.fighterA.espnId || null },
         fighterB: { name: bout.fighterB.name, record: "–", ufcStatsId: null, espnId: bout.fighterB.espnId || null },
         ...(odds ? { oddsA: odds.oddsA, oddsB: odds.oddsB, oddsBook: odds.book } : {}),
+        ...enrichWithPick(fightId, bout.fighterA.name, bout.fighterB.name),
       };
     });
 
@@ -97,6 +131,7 @@ router.get("/events/:eventId/card", async (req, res) => {
       oddsA: f.oddsA,
       oddsB: f.oddsB,
       oddsBook: f.book,
+      ...enrichWithPick(f.id, f.fighterA, f.fighterB),
     }));
     return res.json({ id: ev.id, name: ev.name, date: ev.date, venue: ev.venue, location: ev.location, fights });
   }

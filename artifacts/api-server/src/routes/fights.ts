@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { fetchAllOddsFights, decimalToAmerican } from "../lib/odds.js";
-import { generateDeepAnalysis } from "../lib/ai-analyzer.js";
+import { generateDeepAnalysis, readDiskCache } from "../lib/ai-analyzer.js";
 import { logger } from "../lib/logger.js";
 
 const router = Router();
@@ -16,7 +16,56 @@ router.get("/fights/:fightId/analysis", async (req, res) => {
   const fight = allFights.find((f) => f.id === fightId);
 
   if (!fight) {
-    return res.status(404).json({ error: `Fight ${fightId} not found` });
+    // Fight no longer in live odds feed (completed) — serve from disk cache
+    const cached = readDiskCache(fightId);
+    if (!cached) {
+      return res.status(404).json({ error: `Fight ${fightId} not found` });
+    }
+    logger.info({ fightId }, "Serving completed fight analysis from disk cache");
+    return res.json({
+      fightId,
+      weightClass: "MMA",
+      fighterA: {
+        name: cached.fighterAProfile?.name ?? "Fighter A",
+        record: "–", reach: null, height: null, age: null,
+        stance: cached.fighterAProfile?.style ?? null,
+        style: cached.fighterAProfile?.style ?? "Fighter",
+        slpm: null, strAcc: null, strDef: null,
+        tdAvg: null, tdAcc: null, tdDef: null, subAvg: null,
+        recentForm: cached.fighterAProfile?.recentForm ?? [],
+        strengths: cached.fighterAProfile?.strengths ?? [],
+        weaknesses: cached.fighterAProfile?.weaknesses ?? [],
+      },
+      fighterB: {
+        name: cached.fighterBProfile?.name ?? "Fighter B",
+        record: "–", reach: null, height: null, age: null,
+        stance: cached.fighterBProfile?.style ?? null,
+        style: cached.fighterBProfile?.style ?? "Fighter",
+        slpm: null, strAcc: null, strDef: null,
+        tdAvg: null, tdAcc: null, tdDef: null, subAvg: null,
+        recentForm: cached.fighterBProfile?.recentForm ?? [],
+        strengths: cached.fighterBProfile?.strengths ?? [],
+        weaknesses: cached.fighterBProfile?.weaknesses ?? [],
+      },
+      commonOpponents: (cached.commonOpponents ?? []).map((co) => ({
+        opponent: co.opponent,
+        resultA: co.resultA, methodA: co.methodA,
+        resultB: co.resultB, methodB: co.methodB,
+        notes: co.notes ?? null,
+      })),
+      odds: null, // odds no longer available for completed fights
+      lean: {
+        fighter: cached.fighter,
+        confidence: cached.confidence,
+        reasoning: cached.reasoning,
+        keyEdges: cached.keyEdges ?? [],
+        riskFactors: cached.riskFactors ?? [],
+      },
+      styleMatchup: cached.styleMatchup ?? null,
+      upsetAnalysis: cached.upsetAnalysis ?? null,
+      sherdogUsed: cached.sherdogUsed ?? { fighterA: false, fighterB: false },
+      sources: [{ label: "Replit AI", url: "https://replit.com" }],
+    });
   }
 
   // Deduplicate concurrent requests

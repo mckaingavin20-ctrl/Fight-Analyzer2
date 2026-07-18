@@ -29,6 +29,10 @@ interface ExtendedFighterStats extends FighterStats {
 interface ExtendedFightCard extends FightCard {
   fighterA: ExtendedFighterStats;
   fighterB: ExtendedFighterStats;
+  /** Set by the server once a fight completes and ESPN has a result */
+  pickResult?: 'win' | 'loss' | 'pending' | null;
+  pickWinner?: string | null;
+  gpPick?: string | null;
 }
 interface CommonOpponent {
   opponent: string;
@@ -146,6 +150,69 @@ function deriveRadar(profile: ExtendedFighterStats): RadarMetrics {
 /* ── Main component ────────────────────────────────────────────────── */
 export function FightRow({ fight: rawFight }: { fight: FightCard }) {
   const fight = rawFight as ExtendedFightCard;
+  const isCompleted = fight.pickResult === 'win' || fight.pickResult === 'loss';
+
+  // ── Completed fight: render a compact result card, no analysis needed ──
+  if (isCompleted) {
+    const gpCorrect  = fight.pickResult === 'win';
+    const winner     = fight.pickWinner ?? '?';
+    const isWinnerA  = winner === fight.fighterA.name;
+    return (
+      <div
+        className="rounded-2xl overflow-hidden border opacity-70"
+        style={{
+          background: 'linear-gradient(180deg, #0d0d1a 0%, #0a0a14 100%)',
+          borderColor: gpCorrect ? 'rgba(34,230,110,0.18)' : 'rgba(248,113,113,0.18)',
+        }}
+      >
+        {/* Label strip */}
+        <div className="flex items-center justify-between px-4 pt-3 pb-0">
+          <span className="text-[10px] font-mono font-bold tracking-[0.2em] uppercase"
+            style={{ color: '#2a2a44' }}>
+            {fight.isMain ? '★ MAIN EVENT · ' : ''}<span style={{ color: gpCorrect ? '#22e66e' : '#f87171' }}>FINAL</span>
+          </span>
+          <span className="text-[9px] font-mono uppercase tracking-widest"
+            style={{ color: gpCorrect ? '#22e66e' : '#f87171' }}>
+            GP {gpCorrect ? '✓ Correct' : '✗ Wrong'}
+          </span>
+        </div>
+
+        {/* Fighter row */}
+        <div className="px-4 py-3 flex items-center gap-3">
+          <div className={`flex-1 flex flex-col items-center gap-1.5 py-2 rounded-xl px-2 ${isWinnerA ? 'bg-white/[0.04]' : ''}`}>
+            <FighterAvatar name={fight.fighterA.name} espnId={fight.fighterA.espnId} size="md" />
+            <p className="font-black uppercase text-xs leading-tight tracking-tight text-center">{fight.fighterA.name}</p>
+            {isWinnerA && (
+              <span className="text-[9px] font-mono font-black uppercase tracking-widest px-2 py-0.5 rounded"
+                style={{ background: 'rgba(34,230,110,0.12)', color: '#22e66e' }}>Winner</span>
+            )}
+          </div>
+          <div className="flex flex-col items-center justify-center shrink-0">
+            <span className="text-[10px] font-black font-mono tracking-widest" style={{ color: '#2a2a44' }}>VS</span>
+          </div>
+          <div className={`flex-1 flex flex-col items-center gap-1.5 py-2 rounded-xl px-2 ${!isWinnerA ? 'bg-white/[0.04]' : ''}`}>
+            <FighterAvatar name={fight.fighterB.name} espnId={fight.fighterB.espnId} size="md" />
+            <p className="font-black uppercase text-xs leading-tight tracking-tight text-center">{fight.fighterB.name}</p>
+            {!isWinnerA && (
+              <span className="text-[9px] font-mono font-black uppercase tracking-widest px-2 py-0.5 rounded"
+                style={{ background: 'rgba(34,230,110,0.12)', color: '#22e66e' }}>Winner</span>
+            )}
+          </div>
+        </div>
+
+        {/* Result bar */}
+        <div className="px-4 py-2.5 border-t flex items-center gap-2"
+          style={{ borderColor: 'rgba(255,255,255,0.04)', background: 'rgba(255,255,255,0.01)' }}>
+          <span className="text-[9px] font-mono uppercase tracking-[0.15em]" style={{ color: '#2a2a44' }}>GP Pick</span>
+          <span className="text-[10px] font-black uppercase tracking-tight"
+            style={{ color: gpCorrect ? '#22e66e' : '#f87171' }}>
+            {fight.gpPick ?? '?'}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
   const [isExpanded, setIsExpanded]       = useState(false);
   const [oddsFormat, setOddsFormat]       = useState<OddsFormat>('american');
   const [expandedOpponent, setExpandedOpponent] = useState<string | null>(null);
