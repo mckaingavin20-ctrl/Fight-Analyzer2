@@ -3,7 +3,9 @@ import { batchProcess } from "@workspace/integrations-openai-ai-server/batch";
 import { logger } from "./logger.js";
 import type { OddsFight } from "./odds.js";
 import { decimalToAmerican, trueProbs } from "./odds.js";
+import type { SherdogFighterData } from "./sherdog.js";
 import { getFighterData, formatSherdogContext } from "./sherdog.js";
+import type { UfcStatsFighterStats } from "./ufcstats.js";
 import { getFighterStats, formatUfcStatsContext } from "./ufcstats.js";
 import { recordPick } from "./picks-tracker.js";
 import fs from "node:fs";
@@ -102,27 +104,154 @@ export function clearDiskCache(): void {
 const inFlight = new Map<string, Promise<DeepAnalysis>>();
 
 // ── System prompt ─────────────────────────────────────────────────────
-const SYSTEM_PROMPT = `You are an elite MMA analyst, fight scout, and professional handicapper who specializes in finding value on BOTH sides of a fight — including underdogs.
+const SYSTEM_PROMPT = `You are an elite MMA analyst, fight scout, and professional handicapper with a documented 80%+ prediction accuracy. You specialize in finding value on BOTH sides — favorites and underdogs alike.
 
-You have encyclopedic knowledge of UFC, Bellator, ONE Championship, PFL, and regional MMA. You reason like a betting analyst who has studied thousands of fights: you know that underdogs win roughly 35-40% of MMA fights, that styles make fights regardless of who is favored, and that the market is routinely wrong about fighters whose style is a nightmare for the favorite.
+You reason like a seasoned betting analyst who has studied thousands of fights. You know that styles make fights regardless of who is favored, and that the market is systematically wrong about fighters whose style exploits the favorite's specific weaknesses.
 
-YOUR CORE ANALYTICAL RULES:
-1. Never default to the favorite just because they are favored. The market reflects public perception, not necessarily style advantage.
-2. Toss-up is not an option. Pick one fighter with either "strong" or "lean" confidence.
-3. If the underdog's style genuinely exploits the favorite's known weaknesses, PICK THE UNDERDOG.
-4. The favorite's loss record is your most important clue. If they've been beaten in the same way the underdog fights, that is a red flag.
-5. Use the Sherdog fight records as ground truth for results and methods.
-6. Use UFC official career stats (SLpM, Str.Def, TD Def, etc.) as quantitative evidence — not just vibes.
-   - SLpM (strikes landed/min): measures offensive output. Elite UFC average ≈ 3.5. High = volume striker.
-   - Str.Acc %: precision of landing. <44% = wild; >55% = surgical.
-   - SApM (strikes absorbed/min): how much punishment they eat. High = chin concerns or passive defense.
-   - Str.Def %: how often they avoid shots. >60% = elite; <50% = vulnerability.
-   - TD Avg (per 15 min): grappling aggression. >3 = high-output wrestler.
-   - TD Def %: how often they stop takedowns. >80% = elite; <60% = exploitable.
-   - Sub Avg (per 15 min): submission threat. >1 = active submission game.
-   When you have these stats for both fighters, compare them directly in your analysis.
+═══ CORE ANALYTICAL RULES ═══
+1. NEVER default to the favorite just because they're favored. The market reflects public perception, not style advantage.
+2. Toss-up is NOT an option. Pick one fighter with "strong" or "lean" confidence.
+3. If the underdog's style genuinely exploits the favorite's documented loss pattern — PICK THE UNDERDOG.
+4. The favorite's LOSS METHOD is your most important clue. If they've been stopped/submitted in the same way the underdog fights, that is a major red flag.
+5. Use Sherdog records as ground truth for results and methods. Use UFC career stats as quantitative confirmation.
+
+═══ HOW TO READ THE STATS ═══
+SLpM (strikes landed/min): offensive output. UFC elite avg ≈ 3.5. High = volume striker.
+Str.Acc %: precision. <44% = wild; >55% = surgical.
+SApM (strikes absorbed/min): durability concern. High + low StrDef = defensive liability.
+Str.Def %: how often they dodge/block. >62% = elite; <50% = can be touched.
+Net Strike Diff = SLpM − SApM: POSITIVE means they land more than they eat. Key predictor of striking dominance.
+TD Avg/15min: grappling output. >3.0 = heavy wrestler.
+TD Def %: >82% = elite; <65% = exploitable by any wrestler.
+Sub Avg/15min: >1.0 = constant submission threat on the mat.
+Finish Rate %: what % of wins come by finish (KO+Sub). >70% = dangerous finisher; <40% = likely going to decision.
+Loss Method breakdown: HOW they lose is more predictive than their record. Repeated KO losses = chin; repeated Sub losses = weak ground defense.
+
+═══ PHYSICAL MATCHUP FACTORS ═══
+Reach advantage: every inch of reach is meaningful at range. >3" is a significant striking range edge.
+Stance matchup: Orthodox vs Southpaw creates power-shot angles that favor the southpaw's lead left hand and right overhand. Flag this explicitly.
+Age gap: fighters 32+ show measurable decline in reaction time, chin, and cardio. A 6+ year age gap favors the younger fighter in competitive matchups.
+Layoff rust: fighters returning from 12+ month layoffs underperform in the first 2 rounds before settling in. Flag long layoffs explicitly.
+
+═══ FIGHT STRUCTURE FACTORS ═══
+3-round fights: early finishes are most common in rounds 1-2. Cardio matters less; first-round momentum is critical.
+5-round fights (main events): cardio, championship rounds (4-5), and the ability to adapt mid-fight are decisive. A slower starter with elite cardio often beats an explosive opener.
+Home country / crowd effects: fighters in their home country show measurable performance uplift, especially in close fights.
+
+═══ STATISTICAL PREDICTORS (ranked by importance) ═══
+1. Strike differential (net SLpM) — best single predictor of fight outcome
+2. Takedown defense when combined with the opponent's TD offense
+3. Finish method match: underdog's win method matches favorite's loss method → upset alert
+4. Significant physical advantage (reach >4", age gap >6 years)
+5. Recency and layoff (fresh vs rusty)
 
 Respond ONLY with valid JSON. No markdown, no code fences, no prose outside the JSON.`;
+
+// ── Computed matchup metrics ───────────────────────────────────────────
+function computeMatchupMetrics(
+  fighterA: string,
+  fighterB: string,
+  sherdogA: SherdogFighterData | null,
+  sherdogB: SherdogFighterData | null,
+  statsA: UfcStatsFighterStats | null,
+  statsB: UfcStatsFighterStats | null,
+  isMainEvent: boolean
+): string {
+  const lines: string[] = ["=== COMPUTED MATCHUP METRICS (pre-calculated for you) ==="];
+
+  // ── Reach comparison ──────────────────────────────────────────────────
+  const parseReachIn = (r: string | null | undefined): number | null => {
+    if (!r) return null;
+    const m = r.match(/(\d+(?:\.\d+)?)/);
+    return m ? parseFloat(m[1]) : null;
+  };
+  const reachA = parseReachIn(statsA?.reach);
+  const reachB = parseReachIn(statsB?.reach);
+  if (reachA !== null && reachB !== null) {
+    const diff = reachA - reachB;
+    const who = diff > 0 ? fighterA : fighterB;
+    const mag = Math.abs(diff);
+    const note = mag >= 4 ? "SIGNIFICANT reach edge" : mag >= 2 ? "meaningful reach edge" : "slight reach edge";
+    lines.push(`Reach: ${fighterA} ${reachA}" vs ${fighterB} ${reachB}" → ${who} +${mag}" (${note})`);
+  }
+
+  // ── Age / career stage ────────────────────────────────────────────────
+  if (statsA?.age !== null && statsB?.age !== null && statsA?.age !== undefined && statsB?.age !== undefined) {
+    const diff = Math.abs(statsA.age - statsB.age);
+    const older = statsA.age > statsB.age ? fighterA : fighterB;
+    const younger = statsA.age > statsB.age ? fighterB : fighterA;
+    const note = statsA.age >= 36 || statsB.age >= 36
+      ? `${older} (${Math.max(statsA.age, statsB.age)}) is in potential decline range (36+)`
+      : diff >= 6 ? `${diff}-year gap — ${younger} has meaningful youth/recovery edge`
+      : diff >= 3 ? `${diff}-year gap — minor youth edge to ${younger}`
+      : "ages similar";
+    lines.push(`Age: ${fighterA} ${statsA.age} vs ${fighterB} ${statsB.age} → ${note}`);
+  }
+
+  // ── Stance matchup ────────────────────────────────────────────────────
+  const stanceA = statsA?.stance?.toLowerCase() ?? "";
+  const stanceB = statsB?.stance?.toLowerCase() ?? "";
+  if (stanceA && stanceB) {
+    const aOrtho = stanceA.includes("orthodox");
+    const bOrtho = stanceB.includes("orthodox");
+    const aSouth = stanceA.includes("southpaw");
+    const bSouth = stanceB.includes("southpaw");
+    if ((aOrtho && bSouth) || (aSouth && bOrtho)) {
+      const southpaw = aSouth ? fighterA : fighterB;
+      lines.push(`Stance: ORTHODOX vs SOUTHPAW — ${southpaw} has southpaw angle advantage (power right hand from outside, leads create angle conflicts). Statistically ~6% higher win rate for southpaws in UFC.`);
+    } else {
+      lines.push(`Stance: ${statsA.stance ?? "?"} vs ${statsB.stance ?? "?"} — mirror stance, no angle edge`);
+    }
+  }
+
+  // ── Net strike differential ───────────────────────────────────────────
+  if (statsA?.slpm !== null && statsA?.sapm !== null && statsB?.slpm !== null && statsB?.sapm !== null &&
+      statsA?.slpm !== undefined && statsA?.sapm !== undefined && statsB?.slpm !== undefined && statsB?.sapm !== undefined) {
+    const netA = +(statsA.slpm - statsA.sapm).toFixed(2);
+    const netB = +(statsB.slpm - statsB.sapm).toFixed(2);
+    const edgeWho = netA > netB ? fighterA : fighterB;
+    const edgeMag = Math.abs(netA - netB).toFixed(2);
+    lines.push(`Net strike diff: ${fighterA} ${netA > 0 ? "+" : ""}${netA} vs ${fighterB} ${netB > 0 ? "+" : ""}${netB} → ${edgeWho} wins striking exchange on paper (+${edgeMag} net edge) — strongest predictor of fight outcome`);
+  }
+
+  // ── TD efficiency vs opponent TD defense ──────────────────────────────
+  if (statsA?.tdAvg !== null && statsA?.tdAcc !== null && statsB?.tdDef !== null &&
+      statsA?.tdAvg !== undefined && statsA?.tdAcc !== undefined && statsB?.tdDef !== undefined) {
+    const effA = +(statsA.tdAvg * (statsA.tdAcc / 100)).toFixed(2);
+    const stopRate = statsB.tdDef;
+    const actualA = +(effA * (1 - stopRate / 100)).toFixed(2);
+    lines.push(`${fighterA} TD efficiency: ${effA} actual TDs/15min attempted → vs ${fighterB}'s ${stopRate}% TD def = ~${actualA} TDs likely to land per 15min`);
+  }
+  if (statsB?.tdAvg !== null && statsB?.tdAcc !== null && statsA?.tdDef !== null &&
+      statsB?.tdAvg !== undefined && statsB?.tdAcc !== undefined && statsA?.tdDef !== undefined) {
+    const effB = +(statsB.tdAvg * (statsB.tdAcc / 100)).toFixed(2);
+    const stopRate = statsA.tdDef;
+    const actualB = +(effB * (1 - stopRate / 100)).toFixed(2);
+    lines.push(`${fighterB} TD efficiency: ${effB} actual TDs/15min attempted → vs ${fighterA}'s ${stopRate}% TD def = ~${actualB} TDs likely to land per 15min`);
+  }
+
+  // ── Finish / loss pattern flags ───────────────────────────────────────
+  if (sherdogA) {
+    const losses = sherdogA.recentFights.filter(f => f.result === "loss");
+    const koLosses = losses.filter(f => /ko|tko|knock/i.test(f.method)).length;
+    const subLosses = losses.filter(f => /sub|choke|lock|bar/i.test(f.method)).length;
+    if (koLosses >= 2) lines.push(`⚠ ${fighterA} KO/TKO vulnerability: ${koLosses} recent losses by striking stoppage — chin concern`);
+    if (subLosses >= 2) lines.push(`⚠ ${fighterA} submission vulnerability: ${subLosses} recent submission losses — ground game exposure`);
+  }
+  if (sherdogB) {
+    const losses = sherdogB.recentFights.filter(f => f.result === "loss");
+    const koLosses = losses.filter(f => /ko|tko|knock/i.test(f.method)).length;
+    const subLosses = losses.filter(f => /sub|choke|lock|bar/i.test(f.method)).length;
+    if (koLosses >= 2) lines.push(`⚠ ${fighterB} KO/TKO vulnerability: ${koLosses} recent losses by striking stoppage — chin concern`);
+    if (subLosses >= 2) lines.push(`⚠ ${fighterB} submission vulnerability: ${subLosses} recent submission losses — ground game exposure`);
+  }
+
+  // ── Fight structure ───────────────────────────────────────────────────
+  lines.push(`Scheduled: ${isMainEvent ? "5 ROUNDS (championship/main event) — cardio, adjustments, and championship rounds 4-5 are decisive" : "3 ROUNDS — early momentum and finish rate matter more than cardio"}`);
+
+  lines.push("=== END COMPUTED METRICS ===");
+  return lines.join("\n");
+}
 
 // ── Prompt builder ─────────────────────────────────────────────────────
 function buildPrompt(
@@ -138,10 +267,12 @@ function buildPrompt(
   sherdogA: string | null,
   sherdogB: string | null,
   ufcStatsA: string | null,
-  ufcStatsB: string | null
+  ufcStatsB: string | null,
+  metricsBlock: string,
+  isMainEvent: boolean
 ): string {
 
-  // UFCStats block (official quantitative stats)
+  // UFCStats block
   const ufcStatsBlock = (ufcStatsA || ufcStatsB)
     ? [
         "\n=== UFC OFFICIAL CAREER STATS (ufcstats.com) ===",
@@ -154,6 +285,7 @@ function buildPrompt(
     : "";
 
   const dataBlock = [
+    metricsBlock,
     ufcStatsBlock,
     "=== FIGHT RECORD DATA (SHERDOG) ===",
     `\n--- ${fighterA} ---`,
@@ -164,44 +296,37 @@ function buildPrompt(
   ].join("\n");
 
   const underdogResearch = `
-=== MANDATORY UNDERDOG RESEARCH ===
-Market says: ${favorite} is the FAVORITE (${favOdds}, ~${favImpliedPct}% implied win probability)
-Market says: ${underdog} is the UNDERDOG (${dogOdds}, ~${dogImpliedPct}% implied win probability)
+=== MANDATORY PRE-PICK CHECKLIST ===
+Market: ${favorite} is FAVORITE (${favOdds}, ~${favImpliedPct}% implied probability)
+Market: ${underdog} is UNDERDOG (${dogOdds}, ~${dogImpliedPct}% implied probability)
 
-HISTORICAL MMA UPSET RATES (use as calibration):
-- Underdogs priced at +100 to +150: win ~42% of fights
-- Underdogs priced at +150 to +250: win ~34% of fights
-- Underdogs priced at +250 to +400: win ~27% of fights
-- Underdogs priced at +400 to +600: win ~19% of fights
-- Underdogs priced at +600+: win ~12% of fights
-- The market is NOT always right. Upsets happen constantly in MMA.
+UPSET BASE RATES — calibrate your confidence:
+- Underdog at +100–+150: wins ~42% | +150–+250: ~34% | +250–+400: ~27% | +400–+600: ~19% | +600+: ~12%
 
-BEFORE YOU PICK, YOU MUST ANSWER THESE QUESTIONS IN YOUR ANALYSIS:
+YOU MUST ADDRESS ALL FIVE POINTS IN YOUR REASONING:
 
-1. FAVORITE'S LOSS PATTERN: Look at ${favorite}'s Sherdog losses. What method/style beat them?
-   Does ${underdog}'s style match that loss pattern? If yes — flag this as an UPSET ALERT.
+1. LOSS PATTERN CHECK: What method stopped/beat ${favorite} in their Sherdog losses?
+   Does ${underdog}'s primary skill set match that loss pattern?
+   → If YES: flag UPSET ALERT and weight the underdog more heavily.
 
-2. UNDERDOG'S UPSET HISTORY: Has ${underdog} ever beaten someone of similar or higher caliber?
-   Scan their Sherdog record for wins against ranked fighters, champions, or opponents who
-   were heavy favorites. Successful underdogs have done it before.
+2. PHYSICAL EDGE CHECK: Review the computed metrics above.
+   Which fighter has the reach edge? The age edge? The stance advantage?
+   → Weight these explicitly — a 4"+ reach edge in a striking fight is a huge factor.
 
-3. UNDERDOG'S PATH TO VICTORY: Can ${underdog} realistically win? Describe the specific
-   sequence: "If ${underdog} can establish X, then Y becomes available, which enables Z."
-   Be concrete — name the range, the technique, the pattern.
+3. NET STRIKING EDGE: From the computed net strike differential above — who wins the exchange on paper?
+   Does their actual fight tape confirm this or contradict it?
+   → If stats say one thing but tape says another, the tape wins.
 
-4. STYLE-BASED UPSET POTENTIAL: Some style matchups produce upsets more than others:
-   - Submission specialists vs. wrestlers (guard pullers catching wrestlers)
-   - Orthodox pressure fighters vs. southpaw counterpunchers
-   - High-volume strikers with poor takedown defense vs. elite grapplers
-   - Fighters whose chin/gas tank has been exposed vs. high-output pressure fighters
-   Identify which category this fight falls into.
+4. GRAPPLING BATTLE PROJECTION: From the TD efficiency numbers above — who is more likely to take this to the mat?
+   Does the grappler's takedown output overcome the opponent's TD defense?
+   → Project whether this fight stays standing or goes to the mat.
 
-5. FINAL DECISION: After this research — does the analysis support the favorite OR the
-   underdog? Pick whoever the TAPE supports, regardless of the odds. If you still pick
-   the favorite, explain specifically why the underdog's path to victory fails.
-=== END UNDERDOG RESEARCH ===`;
+5. FINISH RATE VS DISTANCE: ${isMainEvent ? "This is a 5-round main event." : "This is a 3-round fight."}
+   Who has the finish rate to end it early? Who benefits from going the distance?
+   → A fighter with 75%+ finish rate wants to finish; a 30% finisher is banking on decisions.
+=== END CHECKLIST ===`;
 
-  return `Analyze this MMA fight with deep underdog research. Respond ONLY with valid JSON.
+  return `Analyze this MMA fight with maximum analytical depth. Respond ONLY with valid JSON.
 
 Fight: ${fighterA} vs ${fighterB}
 Weight Class: ${weightClass}
@@ -214,17 +339,19 @@ Required JSON structure:
 {
   "fighter": "<winner pick — must be exactly '${fighterA}' or '${fighterB}'>",
   "confidence": "<strong or lean — NEVER toss-up>",
-  "reasoning": "<5-7 paragraphs. Cover: (1) stylistic thesis for your pick, (2) how each fighter imposes their game, (3) the favorite's loss pattern and whether it applies here, (4) the underdog's path to victory and why it succeeds or fails, (5) what the Sherdog tape reveals about finishing ability, chin, gas tank. Reference specific opponents from the records. 400+ words.>",
-  "styleMatchup": "<2-3 paragraphs: the specific style friction, the range where this fight lives, and the X-factor that decides it. Name specific techniques and gameplans.>",
-  "upsetAnalysis": "<3-4 sentences specifically about the underdog: Who is the underdog? What is their realistic path to winning? Does their style exploit the favorite's known loss patterns? Rate upset potential as LOW, MEDIUM, or HIGH and briefly explain why. This field must always be filled — even if you picked the favorite, explain the underdog threat level.>",
+  "reasoning": "<7-9 paragraphs minimum, 500+ words. MANDATORY structure: (1) Opening thesis — one-sentence verdict and why, (2) Physical matchup analysis — address reach/age/stance from the computed metrics, (3) Striking exchange — use net strike diff and UFC career stats with actual numbers, (4) Grappling projection — use TD efficiency numbers, who takes it down and what happens there, (5) Tape analysis — what the Sherdog record reveals, specific opponents, finish methods, patterns, (6) Favorite's loss pattern — does the underdog's style match it?, (7) Underdog's path to victory — specific technique sequence, (8) Decision: why your pick wins and why the other path fails. Reference specific numbers, opponents, and methods throughout.>",
+  "styleMatchup": "<2-3 paragraphs: the specific style friction, the range where this fight lives, and the X-factor that decides it. Name specific techniques and gameplans. Address the stance/reach dynamic.>",
+  "upsetAnalysis": "<4-5 sentences. Who is the underdog? What is their specific path — name the technique/range/pattern. Does their primary win method match the favorite's documented loss pattern? Rate upset potential LOW/MEDIUM/HIGH with a one-sentence justification tied to the tape. Must have real content — never a placeholder.>",
   "keyEdges": [
-    "<precise tactical/physical edge for your pick — tied to their Sherdog record>",
-    "<another specific edge>",
-    "<another — minimum 3, maximum 6>"
+    "<precise edge tied to computed metrics or Sherdog tape — e.g. '+3 inch reach advantage at striking range'>",
+    "<another edge with specific numbers>",
+    "<another>",
+    "<another — minimum 4, maximum 6>"
   ],
   "riskFactors": [
-    "<concrete scenario where your pick loses — name the exact technique or pattern>",
-    "<another risk — minimum 2, maximum 4>"
+    "<concrete scenario where your pick loses — name the exact technique, round, and sequence>",
+    "<another risk>",
+    "<another — minimum 2, maximum 4>"
   ],
   "commonOpponents": [
     {
@@ -233,21 +360,21 @@ Required JSON structure:
       "methodA": "<how ${fighterA} won/lost, e.g. TKO R2>",
       "resultB": "<W or L>",
       "methodB": "<how ${fighterB} won/lost>",
-      "notes": "<what the shared tape reveals — compare HOW each performed, what was exposed>"
+      "notes": "<what the shared tape reveals — compare HOW each performed, what was exposed, round finished, damage taken>"
     }
   ],
   "fighterAProfile": {
     "name": "${fighterA}",
-    "style": "<primary style, e.g. 'Orthodox Pressure Kickboxer | MMA Grappler'>",
-    "strengths": ["<specific strength backed by their Sherdog record>", "<another>", "<another>"],
-    "weaknesses": ["<weakness visible in their losses or close fights>", "<another>"],
+    "style": "<primary style, e.g. 'Orthodox Pressure Kickboxer | Elite Wrestler'>",
+    "strengths": ["<specific strength with stat backing>", "<another>", "<another>", "<another>"],
+    "weaknesses": ["<weakness visible in losses or tape>", "<another>"],
     "recentForm": ["W", "L", "W", "W", "L"],
     "radarMetrics": { "striking": 7, "grappling": 6, "cardio": 8, "chin": 7, "power": 9, "defense": 6 }
   },
   "fighterBProfile": {
     "name": "${fighterB}",
     "style": "<primary style>",
-    "strengths": ["<strength>", "<strength>", "<strength>"],
+    "strengths": ["<strength>", "<strength>", "<strength>", "<strength>"],
     "weaknesses": ["<weakness>", "<weakness>"],
     "recentForm": ["W", "W", "W", "L", "W"],
     "radarMetrics": { "striking": 8, "grappling": 5, "cardio": 7, "chin": 6, "power": 7, "defense": 8 }
@@ -256,10 +383,11 @@ Required JSON structure:
 
 Rules:
 - recentForm: last 5 fights from Sherdog, most recent first, "W" or "L" only.
-- commonOpponents: up to 4 real shared opponents from the Sherdog records. [] only if genuinely none.
+- commonOpponents: up to 4 real shared opponents. [] only if genuinely none.
 - You MUST pick a winner. "toss-up" is never allowed.
-- DO NOT default to the favorite. The underdog wins ~25-35% of fights. If their style fits, pick them.
-- upsetAnalysis must always be filled with real content, not a placeholder.`;
+- DO NOT default to the favorite unless the tape clearly supports them over the underdog.
+- Every keyEdge must be tied to a specific stat, physical attribute, or Sherdog record moment.
+- upsetAnalysis must have real analytical content — not boilerplate.`;
 }
 
 // ── Core analysis function ────────────────────────────────────────────
@@ -303,24 +431,35 @@ async function callAI(fight: OddsFight, weightClass: string): Promise<DeepAnalys
     getFighterStats(fight.fighterB),
   ]);
 
-  const sherdogA = dataA.status === "fulfilled" && dataA.value
-    ? formatSherdogContext(dataA.value) : null;
-  const sherdogB = dataB.status === "fulfilled" && dataB.value
-    ? formatSherdogContext(dataB.value) : null;
+  const rawDataA  = dataA.status  === "fulfilled" ? dataA.value  : null;
+  const rawDataB  = dataB.status  === "fulfilled" ? dataB.value  : null;
+  const rawStatsA = statsA.status === "fulfilled" ? statsA.value : null;
+  const rawStatsB = statsB.status === "fulfilled" ? statsB.value : null;
 
-  const ufcStatsA = statsA.status === "fulfilled" && statsA.value
-    ? formatUfcStatsContext(statsA.value) : null;
-  const ufcStatsB = statsB.status === "fulfilled" && statsB.value
-    ? formatUfcStatsContext(statsB.value) : null;
+  const sherdogA  = rawDataA  ? formatSherdogContext(rawDataA)   : null;
+  const sherdogB  = rawDataB  ? formatSherdogContext(rawDataB)   : null;
+  const ufcStatsA = rawStatsA ? formatUfcStatsContext(rawStatsA) : null;
+  const ufcStatsB = rawStatsB ? formatUfcStatsContext(rawStatsB) : null;
 
-  if (sherdogA) logger.info({ fighter: fight.fighterA }, "Sherdog data included");
-  else logger.warn({ fighter: fight.fighterA }, "No Sherdog data");
+  // Whether this looks like a main event (order 0 in card, or no oddsB meaning single fight)
+  const isMainEvent = false; // We don't have card position in callAI; assume 3-round default
+
+  // Pre-compute matchup metrics block for the AI prompt
+  const metricsBlock = computeMatchupMetrics(
+    fight.fighterA, fight.fighterB,
+    rawDataA, rawDataB,
+    rawStatsA, rawStatsB,
+    isMainEvent
+  );
+
+  if (sherdogA)  logger.info({ fighter: fight.fighterA }, "Sherdog data included");
+  else           logger.warn({ fighter: fight.fighterA }, "No Sherdog data");
   if (ufcStatsA) logger.info({ fighter: fight.fighterA }, "UFCStats data included");
-  else logger.warn({ fighter: fight.fighterA }, "No UFCStats data");
-  if (sherdogB) logger.info({ fighter: fight.fighterB }, "Sherdog data included");
-  else logger.warn({ fighter: fight.fighterB }, "No Sherdog data");
+  else           logger.warn({ fighter: fight.fighterA }, "No UFCStats data");
+  if (sherdogB)  logger.info({ fighter: fight.fighterB }, "Sherdog data included");
+  else           logger.warn({ fighter: fight.fighterB }, "No Sherdog data");
   if (ufcStatsB) logger.info({ fighter: fight.fighterB }, "UFCStats data included");
-  else logger.warn({ fighter: fight.fighterB }, "No UFCStats data");
+  else           logger.warn({ fighter: fight.fighterB }, "No UFCStats data");
 
   logger.info(
     { fightId: fight.id, fighterA: fight.fighterA, fighterB: fight.fighterB },
@@ -329,7 +468,7 @@ async function callAI(fight: OddsFight, weightClass: string): Promise<DeepAnalys
 
   const response = await openai.chat.completions.create({
     model: AI_MODEL,
-    max_completion_tokens: 3500,
+    max_completion_tokens: 5000,
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
       {
@@ -347,7 +486,9 @@ async function callAI(fight: OddsFight, weightClass: string): Promise<DeepAnalys
           sherdogA,
           sherdogB,
           ufcStatsA,
-          ufcStatsB
+          ufcStatsB,
+          metricsBlock,
+          isMainEvent
         ),
       },
     ],

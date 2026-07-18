@@ -223,12 +223,78 @@ export async function getFighterData(
   }
 }
 
+/** Parse Sherdog date strings like "Jul. 18, 2026" → Date */
+function parseSherdogDate(dateStr: string): Date | null {
+  try {
+    const d = new Date(dateStr.replace(/\./g, ""));
+    return isNaN(d.getTime()) ? null : d;
+  } catch {
+    return null;
+  }
+}
+
+/** Categorise a method string into a finish type */
+function finishType(method: string): "KO/TKO" | "Sub" | "Dec" | "Other" {
+  const m = method.toLowerCase();
+  if (m.includes("ko") || m.includes("tko") || m.includes("knockout")) return "KO/TKO";
+  if (m.includes("sub") || m.includes("choke") || m.includes("lock") || m.includes("bar")) return "Sub";
+  if (m.includes("dec") || m.includes("decision") || m.includes("pts")) return "Dec";
+  return "Other";
+}
+
 /** Format Sherdog data into a compact text block for the AI prompt */
 export function formatSherdogContext(data: SherdogFighterData): string {
   const record = `${data.wins}-${data.losses}${data.draws > 0 ? `-${data.draws}` : ""}${data.noContests > 0 ? ` (${data.noContests} NC)` : ""}`;
+
+  // --- Computed finish breakdowns ---
+  const wins   = data.recentFights.filter(f => f.result === "win");
+  const losses = data.recentFights.filter(f => f.result === "loss");
+
+  const countBy = (arr: typeof wins) => {
+    let ko = 0, sub = 0, dec = 0, other = 0;
+    for (const f of arr) {
+      const t = finishType(f.method);
+      if (t === "KO/TKO") ko++;
+      else if (t === "Sub") sub++;
+      else if (t === "Dec") dec++;
+      else other++;
+    }
+    return { ko, sub, dec, other };
+  };
+
+  const wc = countBy(wins);
+  const lc = countBy(losses);
+
+  const winBreakdown = wins.length > 0
+    ? `KO/TKO: ${wc.ko} | Sub: ${wc.sub} | Dec: ${wc.dec}${wc.other ? ` | Other: ${wc.other}` : ""}`
+    : "No recorded wins";
+  const lossBreakdown = losses.length > 0
+    ? `KO/TKO: ${lc.ko} | Sub: ${lc.sub} | Dec: ${lc.dec}${lc.other ? ` | Other: ${lc.other}` : ""}`
+    : "No recorded losses";
+
+  const finishPct = wins.length > 0
+    ? Math.round(((wc.ko + wc.sub) / wins.length) * 100)
+    : 0;
+
+  // --- Layoff ---
+  const lastFightDate = data.recentFights[0]
+    ? parseSherdogDate(data.recentFights[0].date) : null;
+  const daysSinceLast = lastFightDate
+    ? Math.floor((Date.now() - lastFightDate.getTime()) / 86_400_000) : null;
+  const layoffStr = daysSinceLast !== null
+    ? daysSinceLast <= 90  ? `${daysSinceLast}d ago (fresh)`
+    : daysSinceLast <= 180 ? `${daysSinceLast}d ago (normal)`
+    : daysSinceLast <= 365 ? `${daysSinceLast}d ago (moderate layoff)`
+    : `${daysSinceLast}d ago ⚠ LONG LAYOFF — ring rust risk`
+    : "Unknown";
+
   const lines: string[] = [
     `Fighter: ${data.name}`,
     `Record: ${record} | Camp: ${data.association} | From: ${data.nationality}`,
+    `Win method breakdown (recent ${wins.length}): ${winBreakdown}`,
+    `Finish rate: ${finishPct}% of wins by finish`,
+    `Loss method breakdown (recent ${losses.length}): ${lossBreakdown}`,
+    `Last fight: ${layoffStr}`,
     `Recent fights (most recent first):`,
   ];
 

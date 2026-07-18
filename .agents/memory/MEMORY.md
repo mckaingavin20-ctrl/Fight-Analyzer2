@@ -1,0 +1,2 @@
+- [UFCStats scraper](ufcstats-scraper.md) — SHA-256 PoW challenge solved server-side; session cached 50 min; fighter search by last-name letter index with compound-name fallback.
+- [AI analyzer upgrade](ai-analyzer-upgrade.md) — pre-computed matchup metrics injected into prompt; 5-pt checklist forces reach/age/stance/strike-diff/grappling analysis; token limit 5000; Sherdog now includes finish rates + layoff days.
