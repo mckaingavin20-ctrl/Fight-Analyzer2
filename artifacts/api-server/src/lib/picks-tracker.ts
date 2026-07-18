@@ -84,7 +84,7 @@ export function resolvePickResult(fightId: string, result: "win" | "loss"): void
 /** Return all pending picks whose event date has passed (fight should be done). */
 export function getPendingResolvedNeeded(): PickEntry[] {
   const { picks } = readFile();
-  const cutoff = Date.now() - 6 * 60 * 60 * 1000; // 6h after scheduled time
+  const cutoff = Date.now() - 2 * 60 * 60 * 1000; // 2h after scheduled time
   return picks.filter(
     (p) => p.result === "pending" && new Date(p.eventDate).getTime() < cutoff
   );

@@ -63,11 +63,12 @@ export async function getUpcomingEspnEvents(): Promise<EspnEvent[]> {
     (leagues[0]?.calendar as EspnCalendarEntry[] | undefined) ?? [];
 
   const now = new Date();
+  const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000); // keep events from last 24h
   const events: EspnEvent[] = [];
 
   for (const entry of calendar) {
     const startDate = new Date(entry.startDate);
-    if (startDate <= now) continue; // skip past events
+    if (startDate < cutoff) continue; // drop events older than 24h
 
     // Filter to actual UFC/Contender events (skip internal calendar noise)
     const name = entry.label ?? "";

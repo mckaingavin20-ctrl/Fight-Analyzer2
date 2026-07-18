@@ -152,9 +152,11 @@ async function runDailyRefresh(): Promise<void> {
 
 /**
  * Schedule daily analysis refresh at 06:00 UTC.
- * Clears all caches (ESPN, analysis) and re-fetches everything fresh.
+ * Also schedule a lightweight resolve-only pass every 30 minutes for
+ * same-day result tracking (so picks resolve on fight night, not next morning).
  */
 export function scheduleDailyRefresh(): void {
+  // Full refresh: re-fetch events, odds, analyses, then resolve picks
   cron.schedule("0 6 * * *", () => {
     logger.info("06:00 UTC daily refresh triggered");
     runDailyRefresh().catch((err) =>
@@ -162,5 +164,18 @@ export function scheduleDailyRefresh(): void {
     );
   });
 
-  logger.info("Daily refresh scheduled for 06:00 UTC");
+  // Lightweight: resolve completed picks every 30 minutes
+  cron.schedule("*/30 * * * *", () => {
+    resolveCompletedPicks().catch((err) =>
+      logger.warn({ err }, "30-min resolve pass failed")
+    );
+  });
+
+  logger.info("Daily refresh scheduled for 06:00 UTC; resolve pass every 30 min");
 }
+
+/** Manually trigger a full refresh — exposed to admin route. */
+export { runDailyRefresh };
+
+/** Manually trigger picks resolution only — exposed to admin route. */
+export { resolveCompletedPicks };
