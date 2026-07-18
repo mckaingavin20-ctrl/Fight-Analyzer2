@@ -152,78 +152,78 @@ export function FightRow({ fight: rawFight }: { fight: FightCard }) {
   const fight = rawFight as ExtendedFightCard;
   const isCompleted = fight.pickResult === 'win' || fight.pickResult === 'loss';
 
-  // ── Completed fight: render a compact result card, no analysis needed ──
-  if (isCompleted) {
-    const gpCorrect  = fight.pickResult === 'win';
-    const winner     = fight.pickWinner ?? '?';
-    const isWinnerA  = winner === fight.fighterA.name;
-    return (
-      <div
-        className="rounded-2xl overflow-hidden border opacity-70"
-        style={{
-          background: 'linear-gradient(180deg, #0d0d1a 0%, #0a0a14 100%)',
-          borderColor: gpCorrect ? 'rgba(34,230,110,0.18)' : 'rgba(248,113,113,0.18)',
-        }}
-      >
-        {/* Label strip */}
-        <div className="flex items-center justify-between px-4 pt-3 pb-0">
-          <span className="text-[10px] font-mono font-bold tracking-[0.2em] uppercase"
-            style={{ color: '#2a2a44' }}>
-            {fight.isMain ? '★ MAIN EVENT · ' : ''}<span style={{ color: gpCorrect ? '#22e66e' : '#f87171' }}>FINAL</span>
-          </span>
-          <span className="text-[9px] font-mono uppercase tracking-widest"
-            style={{ color: gpCorrect ? '#22e66e' : '#f87171' }}>
-            GP {gpCorrect ? '✓ Correct' : '✗ Wrong'}
-          </span>
-        </div>
-
-        {/* Fighter row */}
-        <div className="px-4 py-3 flex items-center gap-3">
-          <div className={`flex-1 flex flex-col items-center gap-1.5 py-2 rounded-xl px-2 ${isWinnerA ? 'bg-white/[0.04]' : ''}`}>
-            <FighterAvatar name={fight.fighterA.name} espnId={fight.fighterA.espnId} size="md" />
-            <p className="font-black uppercase text-xs leading-tight tracking-tight text-center">{fight.fighterA.name}</p>
-            {isWinnerA && (
-              <span className="text-[9px] font-mono font-black uppercase tracking-widest px-2 py-0.5 rounded"
-                style={{ background: 'rgba(34,230,110,0.12)', color: '#22e66e' }}>Winner</span>
-            )}
-          </div>
-          <div className="flex flex-col items-center justify-center shrink-0">
-            <span className="text-[10px] font-black font-mono tracking-widest" style={{ color: '#2a2a44' }}>VS</span>
-          </div>
-          <div className={`flex-1 flex flex-col items-center gap-1.5 py-2 rounded-xl px-2 ${!isWinnerA ? 'bg-white/[0.04]' : ''}`}>
-            <FighterAvatar name={fight.fighterB.name} espnId={fight.fighterB.espnId} size="md" />
-            <p className="font-black uppercase text-xs leading-tight tracking-tight text-center">{fight.fighterB.name}</p>
-            {!isWinnerA && (
-              <span className="text-[9px] font-mono font-black uppercase tracking-widest px-2 py-0.5 rounded"
-                style={{ background: 'rgba(34,230,110,0.12)', color: '#22e66e' }}>Winner</span>
-            )}
-          </div>
-        </div>
-
-        {/* Result bar */}
-        <div className="px-4 py-2.5 border-t flex items-center gap-2"
-          style={{ borderColor: 'rgba(255,255,255,0.04)', background: 'rgba(255,255,255,0.01)' }}>
-          <span className="text-[9px] font-mono uppercase tracking-[0.15em]" style={{ color: '#2a2a44' }}>GP Pick</span>
-          <span className="text-[10px] font-black uppercase tracking-tight"
-            style={{ color: gpCorrect ? '#22e66e' : '#f87171' }}>
-            {fight.gpPick ?? '?'}
-          </span>
-        </div>
-      </div>
-    );
-  }
-
+  // ── ALL HOOKS MUST COME FIRST — React rules of hooks forbid hooks after a conditional return ──
   const [isExpanded, setIsExpanded]       = useState(false);
   const [oddsFormat, setOddsFormat]       = useState<OddsFormat>('american');
   const [expandedOpponent, setExpandedOpponent] = useState<string | null>(null);
 
   const { data: rawAnalysis, isLoading, isError } = useGetFightAnalysis(fight.id, {
     query: {
-      enabled: !!fight.id,
+      // Never fetch analysis for completed fights — they use the result card below
+      enabled: !!fight.id && !isCompleted,
       queryKey: getGetFightAnalysisQueryKey(fight.id),
       staleTime: 1000 * 60 * 60,
     }
   });
+
+  // ── Completed fight: compact result card ─────────────────────────────
+  if (isCompleted) {
+    const gpCorrect = fight.pickResult === 'win';
+    const winner    = fight.pickWinner ?? '?';
+    const isWinnerA = winner === fight.fighterA.name;
+    return (
+      <div
+        className="rounded-2xl overflow-hidden border"
+        style={{
+          background: '#0c0c10',
+          borderColor: gpCorrect ? 'rgba(34,230,110,0.2)' : 'rgba(248,113,113,0.2)',
+          opacity: 0.72,
+        }}
+      >
+        {/* Label strip */}
+        <div className="flex items-center justify-between px-4 pt-3 pb-0">
+          <span className="text-[10px] font-mono font-bold tracking-[0.18em] uppercase"
+            style={{ color: '#353550' }}>
+            {fight.isMain ? '★ MAIN · ' : ''}
+            <span style={{ color: gpCorrect ? '#22e66e' : '#f87171' }}>FINAL</span>
+          </span>
+          <span className="text-[9px] font-mono font-black uppercase tracking-widest"
+            style={{ color: gpCorrect ? '#22e66e' : '#f87171' }}>
+            {gpCorrect ? '✓ Correct' : '✗ Wrong'}
+          </span>
+        </div>
+
+        {/* Fighters */}
+        <div className="px-4 pb-2 pt-3 flex items-center gap-3">
+          <div className={`flex-1 flex flex-col items-center gap-1.5 py-2 rounded-xl px-2 ${isWinnerA ? 'bg-white/[0.05]' : ''}`}>
+            <FighterAvatar name={fight.fighterA.name} espnId={fight.fighterA.espnId} size="md" />
+            <p className="font-black uppercase text-[11px] leading-tight tracking-tight text-center">{fight.fighterA.name}</p>
+            {isWinnerA && (
+              <span className="text-[8px] font-mono font-black uppercase tracking-widest px-2 py-0.5 rounded"
+                style={{ background: 'rgba(34,230,110,0.12)', color: '#22e66e' }}>WINNER</span>
+            )}
+          </div>
+          <span className="text-[9px] font-black font-mono shrink-0" style={{ color: '#252535' }}>VS</span>
+          <div className={`flex-1 flex flex-col items-center gap-1.5 py-2 rounded-xl px-2 ${!isWinnerA ? 'bg-white/[0.05]' : ''}`}>
+            <FighterAvatar name={fight.fighterB.name} espnId={fight.fighterB.espnId} size="md" />
+            <p className="font-black uppercase text-[11px] leading-tight tracking-tight text-center">{fight.fighterB.name}</p>
+            {!isWinnerA && (
+              <span className="text-[8px] font-mono font-black uppercase tracking-widest px-2 py-0.5 rounded"
+                style={{ background: 'rgba(34,230,110,0.12)', color: '#22e66e' }}>WINNER</span>
+            )}
+          </div>
+        </div>
+
+        {/* GP Pick footer */}
+        <div className="px-4 py-2.5 border-t flex items-center gap-2"
+          style={{ borderColor: 'rgba(255,255,255,0.04)' }}>
+          <span className="text-[9px] font-mono uppercase tracking-widest" style={{ color: '#353550' }}>GP Pick</span>
+          <span className="text-[10px] font-black uppercase tracking-tight"
+            style={{ color: gpCorrect ? '#22e66e' : '#f87171' }}>{fight.gpPick ?? '?'}</span>
+        </div>
+      </div>
+    );
+  }
 
   const analysis  = rawAnalysis as RichAnalysis | undefined;
   const pick      = analysis?.lean?.fighter;
