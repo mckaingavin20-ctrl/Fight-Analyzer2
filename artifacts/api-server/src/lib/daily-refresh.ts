@@ -15,9 +15,9 @@ function nameSim(a: string, b: string): boolean {
   return na === nb || na.includes(nb) || nb.includes(na);
 }
 
-/** Check ESPN results for all pending picks whose event time has passed. */
-async function resolveCompletedPicks(): Promise<void> {
-  const pending = getPendingResolvedNeeded();
+/** Check ESPN results for pending picks. Pass force=true to bypass the time gate. */
+async function resolveCompletedPicks(force = false): Promise<void> {
+  const pending = getPendingResolvedNeeded(force);
   if (pending.length === 0) {
     logger.info("No pending picks to resolve");
     return;

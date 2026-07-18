@@ -11,9 +11,10 @@ const router = Router();
  * Use this right after a fight card finishes.
  */
 router.post("/admin/resolve", async (_req, res) => {
-  logger.info("Manual resolve triggered via admin endpoint");
+  logger.info("Manual resolve triggered via admin endpoint (force=true)");
   try {
-    await resolveCompletedPicks();
+    // force=true bypasses the time gate so results post the moment ESPN has them
+    await resolveCompletedPicks(true);
     res.json({ ok: true, record: getPicksStats() });
   } catch (err) {
     logger.error({ err }, "Manual resolve failed");

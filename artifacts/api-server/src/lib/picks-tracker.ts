@@ -81,10 +81,17 @@ export function resolvePickResult(fightId: string, result: "win" | "loss"): void
   logger.info({ fightId, result }, "Pick resolved");
 }
 
-/** Return all pending picks whose event date has passed (fight should be done). */
-export function getPendingResolvedNeeded(): PickEntry[] {
+/**
+ * Return pending picks that are ready to resolve.
+ * @param force  If true, return ALL pending picks regardless of event time.
+ *               Use this for manual triggers — ESPN updates fast and we
+ *               want to resolve the moment an admin asks, not wait for a timer.
+ */
+export function getPendingResolvedNeeded(force = false): PickEntry[] {
   const { picks } = readFile();
-  const cutoff = Date.now() - 2 * 60 * 60 * 1000; // 2h after scheduled time
+  if (force) return picks.filter((p) => p.result === "pending");
+  // Auto-resolve: wait 30 min after scheduled start (prelims finish quickly)
+  const cutoff = Date.now() - 30 * 60 * 1000;
   return picks.filter(
     (p) => p.result === "pending" && new Date(p.eventDate).getTime() < cutoff
   );
