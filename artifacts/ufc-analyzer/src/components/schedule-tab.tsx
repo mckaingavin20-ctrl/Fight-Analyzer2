@@ -31,7 +31,14 @@ export function ScheduleTab({
     );
   }
 
-  if (!events?.length) {
+  const now = new Date();
+  const upcomingEvents = events?.filter((ev) => {
+    const date    = new Date(ev.date);
+    const isToday = date.toDateString() === now.toDateString();
+    return isToday || date >= now;
+  }) ?? [];
+
+  if (!upcomingEvents.length) {
     return (
       <div className="rounded-2xl border p-14 text-center" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
         <p className="font-mono text-white/30 text-sm">No upcoming events found.</p>
@@ -39,16 +46,13 @@ export function ScheduleTab({
     );
   }
 
-  const now = new Date();
-
   return (
     <div className="space-y-3">
       <p className="text-[11px] font-mono text-white/25 px-1">Upcoming UFC events</p>
 
-      {events.map((ev, i) => {
+      {upcomingEvents.map((ev, i) => {
         const date     = new Date(ev.date);
         const isToday  = date.toDateString() === now.toDateString();
-        const isPast   = date < now && !isToday;
         const isLive   = isToday && ev.hasOdds;
         const hasOdds  = ev.hasOdds;
 
@@ -63,7 +67,7 @@ export function ScheduleTab({
             onClick={() => onSelectEvent(ev.id)}
             className={cn(
               'w-full flex items-center gap-4 px-4 py-4 rounded-2xl border text-left transition-all group',
-              isPast ? 'opacity-40' : 'hover:border-white/15 active:scale-[0.99]'
+              'hover:border-white/15 active:scale-[0.99]'
             )}
             style={{
               background: isLive ? 'rgba(34,230,110,0.05)' : 'rgba(255,255,255,0.02)',
@@ -104,7 +108,7 @@ export function ScheduleTab({
                     LIVE ODDS
                   </span>
                 )}
-                {!hasOdds && !isPast && (
+                {!hasOdds && (
                   <span className="text-[9px] font-mono font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border"
                     style={{ color: '#fbbf24', borderColor: 'rgba(251,191,36,0.2)', background: 'rgba(251,191,36,0.06)' }}>
                     Odds TBD
