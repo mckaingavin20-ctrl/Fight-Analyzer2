@@ -157,7 +157,7 @@ export function FightRow({ fight: rawFight }: { fight: FightCard }) {
   const [oddsFormat, setOddsFormat]       = useState<OddsFormat>('american');
   const [expandedOpponent, setExpandedOpponent] = useState<string | null>(null);
 
-  const { data: rawAnalysis, isLoading, isError } = useGetFightAnalysis(fight.id, {
+  const { data: rawAnalysis, isLoading, isError, error } = useGetFightAnalysis(fight.id, {
     query: {
       // Never fetch analysis for completed fights — they use the result card below
       enabled: !!fight.id && !isCompleted,
@@ -165,6 +165,14 @@ export function FightRow({ fight: rawFight }: { fight: FightCard }) {
       staleTime: 1000 * 60 * 60,
     }
   });
+
+  // A 404 here means the fight is no longer in the live odds feed (it already
+  // happened) and no analysis was ever cached for it — there's nothing useful
+  // to show, so drop it from the card instead of surfacing an error.
+  const isGoneFight = isError && (error as { status?: number } | undefined)?.status === 404;
+  if (isGoneFight) {
+    return null;
+  }
 
   // ── Completed fight: compact result card ─────────────────────────────
   if (isCompleted) {
