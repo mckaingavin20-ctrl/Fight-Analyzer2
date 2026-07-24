@@ -55,10 +55,9 @@ function writeCache(name: string, data: FightMatrixData) {
 }
 
 async function searchFighter(name: string): Promise<string | null> {
-  const parts = name.split(" ");
   // FightMatrix URL format: /mma-fighter-profile/First-Last/ID/
-  // Try searching via their search
   const q = encodeURIComponent(name);
+  const lastName = name.trim().split(/\s+/).pop()?.toLowerCase().replace(/[^a-z]/g, "") ?? "";
   try {
     const html = await axios.get<string>(`${BASE}/?s=${q}`, {
       headers: { "User-Agent": UA },
@@ -66,8 +65,21 @@ async function searchFighter(name: string): Promise<string | null> {
       responseType: "text",
     }).then(r => r.data);
     const $ = cheerio.load(html);
-    const link = $('a[href*="/mma-fighter-profile/"]').first().attr("href");
-    return link ?? null;
+
+    // Score all candidate links — prefer ones whose URL slug contains last name
+    let bestLink: string | null = null;
+    let bestScore = -1;
+    $('a[href*="/mma-fighter-profile/"]').each((_, el) => {
+      const href = $(el).attr("href") ?? "";
+      const slugScore = href.toLowerCase().replace(/[^a-z]/g, "").includes(lastName) ? 1 : 0;
+      if (slugScore > bestScore) { bestScore = slugScore; bestLink = href; }
+    });
+
+    if (bestScore < 1) {
+      logger.debug({ name }, "FightMatrix: no slug last-name match — skipping");
+      return null;
+    }
+    return bestLink;
   } catch { return null; }
 }
 

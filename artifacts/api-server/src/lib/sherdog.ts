@@ -132,34 +132,138 @@ function generateNameVariations(name: string): string[] {
   return [...new Set(variations)];
 }
 
-/** Search Sherdog for a fighter with a single query, return profile URL slug */
-async function searchFighterOnce(query: string): Promise<string | null> {
-  const html = await get(`${SHERDOG_BASE}/stats/fightfinder?SearchTxt=${encodeURIComponent(query)}`);
-  const $ = cheerio.load(html);
+// ── Name-similarity helpers ────────────────────────────────────────────────
 
-  const firstRow = $("table.fightfinder_result tr:not(.table_head)").first();
-  if (!firstRow.length) return null;
-  const anchor = firstRow.find("td a").first();
-  const href = anchor.attr("href");
-  if (!href) return null;
-  return href.startsWith("/") ? href : `/${href}`;
+/** Normalise a name to lowercase alpha-only tokens */
+function normTokens(s: string): string[] {
+  return s
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/\bjr\.?\b|\bsr\.?\b/gi, "")
+    .replace(/[^a-z\s]/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
 }
 
-/** Search Sherdog for a fighter, trying multiple name variations */
+/**
+ * Score how well `candidate` (a name found on Sherdog) matches `query` (what we searched for).
+ * Returns 0–1; higher is better.
+ *
+ * Strategy:
+ *  - Last names must share significant overlap (hard requirement)
+ *  - Token overlap across the full name boosts the score
+ *  - Penalise when the candidate has many extra tokens not in the query
+ */
+function nameMatchScore(query: string, candidate: string): number {
+  const qToks = normTokens(query);
+  const cToks = normTokens(candidate);
+  if (!qToks.length || !cToks.length) return 0;
+
+  const qLast = qToks[qToks.length - 1];
+  const cLast = cToks[cToks.length - 1];
+
+  // Last names must share a stem (handles "Rodrigues" vs "Rodrigues Jr", "Song" vs "Song")
+  const lastOk =
+    qLast === cLast ||
+    qLast.startsWith(cLast) ||
+    cLast.startsWith(qLast);
+  if (!lastOk) return 0;
+
+  // Token overlap
+  const qSet = new Set(qToks);
+  const cSet = new Set(cToks);
+  const shared = [...qSet].filter((t) => cSet.has(t)).length;
+  const union  = new Set([...qToks, ...cToks]).size;
+  const jaccard = shared / union;
+
+  // Extra penalty: candidate has tokens that aren't in query at all
+  const extraC = [...cSet].filter((t) => !qSet.has(t)).length;
+  const penalty = extraC * 0.08;
+
+  return Math.max(0, jaccard - penalty);
+}
+
+interface SearchCandidate { slug: string; name: string }
+
+/** Search Sherdog, return ALL result rows as { slug, name } candidates */
+async function searchFighterOnce(query: string): Promise<SearchCandidate[]> {
+  const html = await get(
+    `${SHERDOG_BASE}/stats/fightfinder?SearchTxt=${encodeURIComponent(query)}`
+  );
+  const $ = cheerio.load(html);
+  const candidates: SearchCandidate[] = [];
+
+  $("table.fightfinder_result tr:not(.table_head)").each((_, row) => {
+    const anchor = $(row).find("td a").first();
+    const href   = anchor.attr("href");
+    const name   = anchor.text().trim();
+    if (!href || !name) return;
+    const slug = href.startsWith("/") ? href : `/${href}`;
+    candidates.push({ slug, name });
+  });
+
+  return candidates;
+}
+
+/**
+ * Search Sherdog for a fighter by trying multiple name variations.
+ * For each variation, we fetch ALL result rows, score each candidate against
+ * the *original* query name, and return the best-matching slug.
+ *
+ * Rejects a candidate if:
+ *   - Name match score < 0.25 (clearly different person)
+ *   - Last fight was before 2016 AND query fighter is expected to be active
+ *     (we detect "stale" by fetching a lightweight profile check)
+ */
 async function searchFighter(name: string): Promise<string | null> {
   const variations = generateNameVariations(name);
+  let bestSlug: string | null = null;
+  let bestScore = 0;
+
   for (const v of variations) {
+    let candidates: SearchCandidate[] = [];
     try {
-      const result = await searchFighterOnce(v);
-      if (result) {
-        if (v !== name) logger.info({ original: name, usedVariation: v }, "Sherdog: found via name variation");
-        return result;
-      }
+      candidates = await searchFighterOnce(v);
     } catch {
-      // continue to next variation
+      continue;
     }
+    if (!candidates.length) continue;
+
+    for (const c of candidates) {
+      const score = nameMatchScore(name, c.name);
+      if (score > bestScore) {
+        bestScore = score;
+        bestSlug = c.slug;
+        if (v !== name) {
+          logger.info({ original: name, usedVariation: v, matched: c.name, score }, "Sherdog: candidate via variation");
+        }
+      }
+    }
+
+    // If we already have a strong match (≥0.6), stop trying further variations
+    if (bestScore >= 0.6) break;
   }
-  return null;
+
+  if (!bestSlug || bestScore < 0.20) {
+    logger.warn({ name, bestScore }, "Sherdog: no confident name match found");
+    return null;
+  }
+
+  logger.info({ name, bestSlug, bestScore: bestScore.toFixed(2) }, "Sherdog: best slug selected");
+  return bestSlug;
+}
+
+/** Quick sanity check: is the fetched profile plausibly for an active MMA fighter?
+ *  Returns false if the most recent fight is before 2016 — likely a wrong/retired person. */
+function profileLooksActive(data: SherdogFighterData): boolean {
+  const latest = data.recentFights[0];
+  if (!latest) return true; // no fights parsed — give benefit of the doubt
+  // Parse "Jul / 18 / 2026" or "Jul. 18, 2026" or "2026-07-18"
+  const yearMatch = latest.date.match(/\b(20\d\d|19\d\d)\b/);
+  if (!yearMatch) return true;
+  const year = parseInt(yearMatch[1], 10);
+  return year >= 2016;
 }
 
 /** Parse a Sherdog fighter profile page */
@@ -241,10 +345,25 @@ function parseProfile(html: string, profileUrl: string): SherdogFighterData {
 export async function getFighterData(
   fighterName: string
 ): Promise<SherdogFighterData | null> {
+  // Validate cache: evict entries that look like a wrong person was fetched
   const cached = readCache(fighterName);
   if (cached) {
-    logger.debug({ fighterName }, "Returning cached Sherdog data");
-    return cached;
+    const nameScore = nameMatchScore(fighterName, cached.name);
+    const active    = profileLooksActive(cached);
+    if (nameScore < 0.20 || !active) {
+      logger.warn(
+        { fighterName, cachedName: cached.name, nameScore: nameScore.toFixed(2), active },
+        "Sherdog cache evicted — wrong person or stale profile; re-fetching"
+      );
+      // Remove bad cache entry
+      try {
+        const p = path.join(CACHE_DIR, `${cacheKey(fighterName)}.json`);
+        if (fs.existsSync(p)) fs.unlinkSync(p);
+      } catch { /* ignore */ }
+    } else {
+      logger.debug({ fighterName, nameScore: nameScore.toFixed(2) }, "Returning cached Sherdog data");
+      return cached;
+    }
   }
 
   try {
@@ -252,18 +371,35 @@ export async function getFighterData(
 
     const profileSlug = await searchFighter(fighterName);
     if (!profileSlug) {
-      logger.warn({ fighterName }, "Sherdog search returned no results");
+      logger.warn({ fighterName }, "Sherdog search: no confident match found");
       return null;
     }
 
     const profileHtml = await get(`${SHERDOG_BASE}${profileSlug}`);
     const data = parseProfile(profileHtml, profileSlug);
-    data.name = data.name || fighterName; // fallback if parse missed name
+    data.name = data.name || fighterName;
+
+    // Final guard: if the parsed profile doesn't look like the right person, abort
+    const nameScore = nameMatchScore(fighterName, data.name);
+    if (nameScore < 0.20) {
+      logger.warn(
+        { fighterName, fetchedName: data.name, nameScore: nameScore.toFixed(2), url: data.sherdogUrl },
+        "Sherdog: fetched profile name doesn't match query — discarding"
+      );
+      return null;
+    }
+    if (!profileLooksActive(data)) {
+      logger.warn(
+        { fighterName, fetchedName: data.name, lastFight: data.recentFights[0]?.date },
+        "Sherdog: fetched profile last fight is before 2016 — likely wrong/retired fighter, discarding"
+      );
+      return null;
+    }
 
     writeCache(fighterName, data);
     logger.info(
-      { fighterName, record: `${data.wins}-${data.losses}`, fights: data.recentFights.length },
-      "Sherdog data fetched"
+      { fighterName, fetchedName: data.name, nameScore: nameScore.toFixed(2), record: `${data.wins}-${data.losses}` },
+      "Sherdog data fetched and validated"
     );
     return data;
   } catch (err) {

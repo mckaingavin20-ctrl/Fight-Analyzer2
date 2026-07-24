@@ -169,6 +169,34 @@ function nameSim(a: string, b: string): boolean {
 }
 
 /**
+ * Score how well `candidate` matches `query`.
+ * Returns 0–1. Last-name must match for any score > 0.
+ */
+function nameScore(query: string, candidate: string): number {
+  const normToks = (s: string) =>
+    s.toLowerCase()
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/\bjr\.?\b|\bsr\.?\b/gi, "")
+      .replace(/[^a-z\s]/g, " ")
+      .trim().split(/\s+/).filter(Boolean);
+
+  const qToks = normToks(query);
+  const cToks = normToks(candidate);
+  if (!qToks.length || !cToks.length) return 0;
+
+  const qLast = qToks[qToks.length - 1];
+  const cLast = cToks[cToks.length - 1];
+  // Last names must share a meaningful stem
+  if (qLast !== cLast && !qLast.startsWith(cLast) && !cLast.startsWith(qLast)) return 0;
+
+  const qSet = new Set(qToks);
+  const cSet = new Set(cToks);
+  const shared = [...qSet].filter(t => cSet.has(t)).length;
+  const union  = new Set([...qToks, ...cToks]).size;
+  return shared / union;
+}
+
+/**
  * Candidate letters to try for a fighter name, in order:
  * last-name first letter, second-to-last word, first-name first letter.
  * Also tries accent-normalized first letters.
@@ -190,38 +218,62 @@ function candidateLetters(fullName: string): string[] {
 async function searchFighterByLetter(
   name: string,
   letter: string
-): Promise<string | null> {
+): Promise<{ url: string; score: number; matchedName: string } | null> {
   const html = await get(`${BASE}/statistics/fighters?char=${letter}&page=all`);
   const $ = cheerio.load(html);
 
-  let detailUrl: string | null = null;
+  let bestUrl: string | null = null;
+  let bestScore = 0;
+  let bestName = "";
+
   $("tr").each((_, row) => {
-    if (detailUrl) return;
-    const firstA = $(row).find("a").first();
+    const firstA  = $(row).find("a").first();
     const secondA = $(row).find("a").eq(1);
     const firstName = firstA.text().trim();
-    const lastName = secondA.text().trim();
+    const lastName  = secondA.text().trim();
     const fullRowName = `${firstName} ${lastName}`.trim();
     if (!fullRowName) return;
-    if (nameSim(fullRowName, name)) {
-      detailUrl = firstA.attr("href") ?? null;
+
+    const score = nameScore(fullRowName, name);
+    if (score > bestScore) {
+      bestScore = score;
+      bestUrl   = firstA.attr("href") ?? null;
+      bestName  = fullRowName;
     }
   });
 
-  return detailUrl;
+  if (!bestUrl || bestScore < 0.25) return null;
+  return { url: bestUrl, score: bestScore, matchedName: bestName };
 }
 
 async function searchFighter(name: string): Promise<string | null> {
   const letters = candidateLetters(name);
+  let bestUrl: string | null = null;
+  let bestScore = 0;
+
   for (const letter of letters) {
     try {
-      const url = await searchFighterByLetter(name, letter);
-      if (url) return url;
+      const result = await searchFighterByLetter(name, letter);
+      if (result && result.score > bestScore) {
+        bestScore = result.score;
+        bestUrl   = result.url;
+        logger.info(
+          { name, letter, matchedName: result.matchedName, score: result.score.toFixed(2) },
+          "UFCStats: candidate found"
+        );
+      }
+      // Stop early if we have a strong match
+      if (bestScore >= 0.7) break;
     } catch (err) {
       logger.debug({ err, name, letter }, "UFCStats: letter page fetch failed");
     }
   }
-  return null;
+
+  if (!bestUrl || bestScore < 0.25) {
+    logger.warn({ name, bestScore }, "UFCStats: no confident match found");
+    return null;
+  }
+  return bestUrl;
 }
 
 // ── Fighter detail parser ──────────────────────────────────────────────
@@ -330,10 +382,20 @@ export async function getFighterStats(
     const data = parseFighterDetail(html, detailUrl);
     data.name = data.name || name;
 
+    // Validate the fetched profile is actually the right person
+    const score = nameScore(name, data.name);
+    if (score < 0.20) {
+      logger.warn(
+        { queried: name, fetchedName: data.name, score: score.toFixed(2), url: detailUrl },
+        "UFCStats: fetched profile name doesn't match query — discarding"
+      );
+      return null;
+    }
+
     writeFighterCache(name, data);
     logger.info(
-      { name, slpm: data.slpm, tdDef: data.tdDef, strDef: data.strDef },
-      "UFCStats: fighter stats fetched"
+      { name, fetchedName: data.name, score: score.toFixed(2), slpm: data.slpm, reach: data.reach },
+      "UFCStats: fighter stats fetched and validated"
     );
     return data;
   } catch (err) {

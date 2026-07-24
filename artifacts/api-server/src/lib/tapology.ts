@@ -79,20 +79,43 @@ async function get(url: string): Promise<string> {
   return r.data;
 }
 
+/** Quick last-name check: does the URL slug contain the fighter's last name? */
+function slugMatchesName(slug: string, name: string): boolean {
+  const lastName = name.trim().split(/\s+/).pop() ?? "";
+  const normed = lastName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z]/g, "");
+  const slugNorm = slug.toLowerCase().replace(/[^a-z]/g, "");
+  return slugNorm.includes(normed);
+}
+
 async function searchFighter(name: string): Promise<string | null> {
   const query = encodeURIComponent(name);
   const html = await get(`${BASE}/search?term=${query}&type=fighters`);
   const $ = cheerio.load(html);
 
-  // Find fighter links in search results
-  const links: string[] = [];
+  // Collect all fighter links with their display names from search results
+  const candidates: Array<{ href: string; label: string }> = [];
   $('a[href*="/fightcenter/fighters/"]').each((_, el) => {
-    const href = $(el).attr("href");
-    if (href && href.includes("/fightcenter/fighters/")) links.push(href);
+    const href  = $(el).attr("href") ?? "";
+    const label = $(el).text().trim();
+    if (href.match(/\/fighters\/\d+-/)) candidates.push({ href, label });
   });
 
-  // Return first valid profile link (not the search page itself)
-  return links.find(l => l.match(/\/fighters\/\d+-/)) ?? null;
+  if (!candidates.length) return null;
+
+  // Score each candidate: prefer ones whose URL slug contains the fighter's last name
+  const lastName = name.trim().split(/\s+/).pop()?.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z]/g,"") ?? "";
+  const scored = candidates.map(c => ({
+    ...c,
+    score: c.href.toLowerCase().includes(lastName) ? 1 : 0,
+  }));
+  scored.sort((a, b) => b.score - a.score);
+
+  const best = scored[0];
+  if (best.score === 0) {
+    logger.debug({ name, topSlug: best.href }, "Tapology: no slug last-name match — skipping to avoid wrong person");
+    return null;
+  }
+  return best.href;
 }
 
 function parseProfile(html: string): Partial<TapologyFighterData> {
@@ -163,7 +186,17 @@ function parseProfile(html: string): Partial<TapologyFighterData> {
 
 export async function getTapologyData(fighterName: string): Promise<TapologyFighterData | null> {
   const cached = readCache(fighterName);
-  if (cached) return cached;
+  if (cached) {
+    // Validate cached name against queried name
+    const cachedName = cached.name ?? "";
+    const lastName = fighterName.trim().split(/\s+/).pop()?.toLowerCase() ?? "";
+    if (cachedName && !cachedName.toLowerCase().includes(lastName)) {
+      logger.warn({ fighterName, cachedName }, "Tapology: cache evicted — wrong person cached");
+      try { const p = path.join(CACHE_DIR, `${cacheKey(fighterName)}.json`); if (fs.existsSync(p)) fs.unlinkSync(p); } catch { /* ignore */ }
+    } else {
+      return cached;
+    }
+  }
 
   try {
     const profileUrl = await searchFighter(fighterName);
@@ -174,6 +207,15 @@ export async function getTapologyData(fighterName: string): Promise<TapologyFigh
 
     const profileHtml = await get(`${BASE}${profileUrl.startsWith("http") ? profileUrl.replace(BASE, "") : profileUrl}`);
     const data = parseProfile(profileHtml);
+
+    // Validate the parsed name matches the queried fighter
+    if (data.name) {
+      const lastName = fighterName.trim().split(/\s+/).pop()?.toLowerCase() ?? "";
+      if (!data.name.toLowerCase().includes(lastName)) {
+        logger.warn({ fighterName, fetchedName: data.name }, "Tapology: fetched profile name doesn't match — discarding");
+        return null;
+      }
+    }
 
     const result: TapologyFighterData = {
       name: data.name ?? fighterName,

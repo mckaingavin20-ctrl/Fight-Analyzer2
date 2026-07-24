@@ -60,7 +60,6 @@ function writeCache(name: string, data: MmaDecisionsData) {
 
 async function searchFighter(name: string): Promise<string | null> {
   // MMADecisions uses URL format /fighter/<id>/<slug>
-  // Search via their search page
   const q = encodeURIComponent(name);
   const html = await axios.get<string>(`${BASE}/fighter-search.php?q=${q}`, {
     headers: { "User-Agent": UA },
@@ -69,8 +68,23 @@ async function searchFighter(name: string): Promise<string | null> {
   }).then(r => r.data).catch(() => "");
 
   const $ = cheerio.load(html);
-  const link = $('a[href*="/fighter/"]').first().attr("href");
-  return link ?? null;
+  const lastName = name.trim().split(/\s+/).pop()?.toLowerCase().replace(/[^a-z]/g, "") ?? "";
+
+  // Score all candidate links — prefer ones whose href slug contains the fighter's last name
+  let bestLink: string | null = null;
+  let bestScore = -1;
+  $('a[href*="/fighter/"]').each((_, el) => {
+    const href = $(el).attr("href") ?? "";
+    if (!href.includes("/fighter/")) return;
+    const slugScore = href.toLowerCase().replace(/[^a-z]/g, "").includes(lastName) ? 1 : 0;
+    if (slugScore > bestScore) { bestScore = slugScore; bestLink = href; }
+  });
+
+  if (bestScore < 1) {
+    logger.debug({ name }, "MMADecisions: no slug last-name match — skipping");
+    return null;
+  }
+  return bestLink;
 }
 
 export async function getMmaDecisionsData(fighterName: string): Promise<MmaDecisionsData | null> {
