@@ -8,12 +8,13 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { LogOut, LayoutGrid, Trophy, CalendarDays } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-const GREEN = '#22e66e';
+const GOLD   = '#f59e0b';
+const VIOLET = '#7c3aed';
 
 type Tab = 'card' | 'record' | 'schedule';
 
 export default function Analyzer() {
-  const [tab, setTab]                     = useState<Tab>('card');
+  const [tab, setTab]                         = useState<Tab>('card');
   const [selectedEventId, setSelectedEventId] = useState<string>('');
   const { user } = useUser();
   const { signOut } = useClerk();
@@ -21,23 +22,24 @@ export default function Analyzer() {
   const { data: events, isLoading: isLoadingEvents } = useListEvents();
   const { data: record } = useGetRecord({ query: { staleTime: 1000 * 60 * 2, refetchInterval: 1000 * 60 * 2 } });
 
+  // Default to first upcoming event (nearest date), regardless of odds
   useEffect(() => {
     if (!events?.length || selectedEventId) return;
-    const withOdds = events.find(e => e.hasOdds);
-    setSelectedEventId((withOdds ?? events[0]).id);
+    const sorted = [...events].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    setSelectedEventId(sorted[0].id);
   }, [events, selectedEventId]);
 
   const selectedEvent = events?.find(e => e.id === selectedEventId);
   const { data: eventCard, isLoading: isLoadingCard } = useGetEventCard(selectedEventId, {
     query: {
-      enabled: !!selectedEventId && !!selectedEvent?.hasOdds,
+      enabled: !!selectedEventId,
       queryKey: getGetEventCardQueryKey(selectedEventId),
       staleTime: 1000 * 60 * 5,
     },
   });
 
-  const basePath = import.meta.env.BASE_URL.replace(/\/$/, '');
-  const initials = (user?.firstName?.[0] ?? user?.emailAddresses?.[0]?.emailAddress?.[0] ?? '?').toUpperCase();
+  const basePath   = import.meta.env.BASE_URL.replace(/\/$/, '');
+  const initials   = (user?.firstName?.[0] ?? user?.emailAddresses?.[0]?.emailAddress?.[0] ?? '?').toUpperCase();
   const displayName = user?.firstName ?? user?.emailAddresses?.[0]?.emailAddress?.split('@')[0] ?? '';
 
   const wins    = record?.wins   ?? 0;
@@ -52,26 +54,22 @@ export default function Analyzer() {
   ];
 
   return (
-    <div className="min-h-[100dvh] flex flex-col" style={{ background: '#07070a' }}>
+    <div className="min-h-[100dvh] flex flex-col" style={{ background: '#07070e' }}>
 
-      {/* ── Header ───────────────────────────────────────────────────── */}
-      <header
-        className="sticky top-0 z-40 border-b px-4 sm:px-6"
-        style={{
-          background: 'rgba(7,7,10,0.88)',
-          backdropFilter: 'blur(16px)',
-          borderColor: 'rgba(255,255,255,0.07)',
-        }}
-      >
+      {/* ── Header ── */}
+      <header className="sticky top-0 z-40 border-b px-4 sm:px-6"
+        style={{ background: 'rgba(7,7,14,0.92)', backdropFilter: 'blur(18px)', borderColor: 'rgba(255,255,255,0.07)' }}>
         <div className="flex items-center justify-between h-14">
           {/* Brand */}
           <div className="flex items-center gap-2.5 shrink-0">
-            <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-[11px] font-black tracking-tight"
-              style={{ background: 'rgba(34,230,110,0.1)', color: GREEN, border: `1px solid rgba(34,230,110,0.22)` }}
-            >GP</div>
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center text-[11px] font-black tracking-tight"
+              style={{ background: 'rgba(124,58,237,0.14)', color: VIOLET, border: `1px solid rgba(124,58,237,0.28)` }}>
+              GP
+            </div>
             <div className="hidden sm:flex flex-col leading-none">
-              <span className="text-[11px] font-black uppercase tracking-[0.2em] text-white">Gavin's <span style={{ color: GREEN }}>Picks™</span></span>
+              <span className="text-[11px] font-black uppercase tracking-[0.2em] text-white">
+                Gavin's <span style={{ color: GOLD }}>Picks™</span>
+              </span>
             </div>
           </div>
 
@@ -79,17 +77,13 @@ export default function Analyzer() {
           <div className="flex items-center gap-3">
             {/* W-L pill */}
             {hasRecord && (
-              <div
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-mono font-bold border"
-                style={{ background: 'rgba(34,230,110,0.06)', borderColor: 'rgba(34,230,110,0.18)' }}
-              >
-                <span style={{ color: GREEN }}>{wins}W–{losses}L</span>
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-mono font-bold border"
+                style={{ background: 'rgba(245,158,11,0.06)', borderColor: 'rgba(245,158,11,0.2)' }}>
+                <span style={{ color: GOLD }}>{wins}W–{losses}L</span>
                 {pct !== null && (
                   <>
                     <span className="text-white/20">·</span>
-                    <span style={{ color: pct >= 60 ? GREEN : pct >= 50 ? '#fbbf24' : '#f87171' }}>
-                      {pct}%
-                    </span>
+                    <span style={{ color: pct >= 60 ? '#4ade80' : pct >= 50 ? GOLD : '#f87171' }}>{pct}%</span>
                   </>
                 )}
               </div>
@@ -98,45 +92,35 @@ export default function Analyzer() {
             {/* Live dot */}
             <div className="hidden sm:flex items-center gap-1.5">
               <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60" style={{ background: GREEN }} />
-                <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: GREEN }} />
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60" style={{ background: VIOLET }} />
+                <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: VIOLET }} />
               </span>
-              <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: `${GREEN}99` }}>Live</span>
+              <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: `${VIOLET}99` }}>Live</span>
             </div>
 
             {/* User */}
             {user && (
               <div className="flex items-center gap-2 pl-3 border-l" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
-                <div
-                  className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-black"
-                  style={{ background: 'rgba(34,230,110,0.14)', color: GREEN }}
-                >{initials}</div>
-                <span className="hidden md:block text-[10px] font-mono text-white/35 max-w-[100px] truncate">{displayName}</span>
-                <button
-                  onClick={() => signOut({ redirectUrl: basePath || '/' })}
-                  className="p-1.5 rounded-lg hover:bg-white/5 transition-colors"
-                  title="Sign out"
-                >
-                  <LogOut className="w-3.5 h-3.5 text-white/25 hover:text-white/50" />
+                <div className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-black"
+                  style={{ background: 'rgba(245,158,11,0.14)', color: GOLD }}>{initials}</div>
+                <span className="hidden md:block text-[10px] font-mono text-white/30 max-w-[100px] truncate">{displayName}</span>
+                <button onClick={() => signOut({ redirectUrl: basePath || '/' })}
+                  className="p-1.5 rounded-lg hover:bg-white/5 transition-colors" title="Sign out">
+                  <LogOut className="w-3.5 h-3.5 text-white/20 hover:text-white/50" />
                 </button>
               </div>
             )}
           </div>
         </div>
 
-        {/* ── Tab bar ─────────────────────────────────────────────────── */}
+        {/* Tab bar */}
         <div className="flex items-center gap-0 -mb-px">
           {tabs.map(t => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
+            <button key={t.id} onClick={() => setTab(t.id)}
               className={cn(
                 'flex items-center gap-1.5 px-4 py-2.5 text-[11px] font-mono font-bold uppercase tracking-widest border-b-2 transition-colors whitespace-nowrap',
-                tab === t.id
-                  ? 'border-b-[#22e66e] text-white'
-                  : 'border-b-transparent text-white/30 hover:text-white/60'
-              )}
-            >
+                tab === t.id ? 'border-b-amber-500 text-white' : 'border-b-transparent text-white/30 hover:text-white/60'
+              )}>
               {t.icon}
               {t.label}
             </button>
@@ -144,7 +128,7 @@ export default function Analyzer() {
         </div>
       </header>
 
-      {/* ── Content ──────────────────────────────────────────────────── */}
+      {/* ── Content ── */}
       <main className="flex-1 w-full max-w-2xl mx-auto px-4 sm:px-6 py-6">
         {tab === 'card'     && (
           <CardTab
@@ -158,10 +142,16 @@ export default function Analyzer() {
           />
         )}
         {tab === 'record'   && <RecordTab record={record} />}
-        {tab === 'schedule' && <ScheduleTab events={events} isLoading={isLoadingEvents} onSelectEvent={(id) => { setSelectedEventId(id); setTab('card'); }} />}
+        {tab === 'schedule' && (
+          <ScheduleTab
+            events={events}
+            isLoading={isLoadingEvents}
+            onSelectEvent={(id) => { setSelectedEventId(id); setTab('card'); }}
+          />
+        )}
       </main>
 
-      {/* ── Footer ───────────────────────────────────────────────────── */}
+      {/* ── Footer ── */}
       <footer className="border-t px-4 py-4 text-center" style={{ borderColor: 'rgba(255,255,255,0.04)' }}>
         <p className="text-[10px] font-mono" style={{ color: 'rgba(255,255,255,0.15)' }}>
           © {new Date().getFullYear()} Gavin's Picks™ · For entertainment purposes only · Gamble responsibly
@@ -171,67 +161,43 @@ export default function Analyzer() {
   );
 }
 
-/* ── Card Tab ────────────────────────────────────────────────────────── */
+/* ── Card Tab ── */
 function CardTab({
   events, isLoadingEvents, selectedEventId, setSelectedEventId,
   selectedEvent, eventCard, isLoadingCard,
 }: {
-  events: any;
-  isLoadingEvents: boolean;
-  selectedEventId: string;
-  setSelectedEventId: (id: string) => void;
-  selectedEvent: any;
-  eventCard: any;
-  isLoadingCard: boolean;
+  events: any; isLoadingEvents: boolean; selectedEventId: string;
+  setSelectedEventId: (id: string) => void; selectedEvent: any;
+  eventCard: any; isLoadingCard: boolean;
 }) {
-  const GREEN = '#22e66e';
-
   return (
     <div className="space-y-5">
-      {/* Event selector */}
+      {/* Event selector chips */}
       {isLoadingEvents ? (
-        <Skeleton className="h-20 w-full rounded-2xl bg-white/[0.04]" />
+        <Skeleton className="h-10 w-full rounded-full bg-white/[0.04]" />
       ) : events?.length ? (
         <div>
-          {/* Event list as chips */}
           <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
             {events.map((ev: any) => (
-              <button
-                key={ev.id}
-                onClick={() => setSelectedEventId(ev.id)}
-                className={cn(
-                  'shrink-0 px-4 py-2 rounded-full text-[11px] font-mono font-bold border transition-all whitespace-nowrap',
-                  selectedEventId === ev.id
-                    ? 'text-black border-transparent'
-                    : 'text-white/40 border-white/10 hover:border-white/20 hover:text-white/70'
-                )}
+              <button key={ev.id} onClick={() => setSelectedEventId(ev.id)}
+                className="shrink-0 px-4 py-2 rounded-full text-[11px] font-mono font-bold border transition-all whitespace-nowrap"
                 style={selectedEventId === ev.id
-                  ? { background: GREEN, borderColor: 'transparent' }
-                  : { background: 'rgba(255,255,255,0.03)' }
-                }
-              >
+                  ? { background: GOLD, color: '#000', borderColor: 'transparent' }
+                  : { background: 'rgba(255,255,255,0.03)', color: 'rgba(255,255,255,0.4)', borderColor: 'rgba(255,255,255,0.1)' }
+                }>
                 {ev.name.replace(/^UFC\s+/i, 'UFC ').replace(/Fight Night:\s*/i, 'FN: ')}
-                {!ev.hasOdds && (
-                  <span className="ml-1.5 opacity-60">· TBD</span>
-                )}
+                {!ev.hasOdds && <span className="ml-1.5 opacity-60">· TBD</span>}
               </button>
             ))}
           </div>
-
-          {/* Selected event meta */}
           {selectedEvent && (
-            <div className="mt-3 flex flex-wrap items-center gap-3 px-1 text-[11px] font-mono text-white/30">
+            <div className="mt-3 flex flex-wrap items-center gap-3 px-1 text-[11px] font-mono text-white/25">
               <span>{new Date(selectedEvent.date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</span>
-              {selectedEvent.location && (
-                <>
-                  <span className="text-white/15">·</span>
-                  <span>{selectedEvent.location}</span>
-                </>
-              )}
+              {selectedEvent.location && (<><span className="text-white/15">·</span><span>{selectedEvent.location}</span></>)}
               {!selectedEvent.hasOdds && (
                 <span className="px-2 py-0.5 rounded-full border text-[10px] font-black uppercase tracking-widest"
-                  style={{ color: '#fbbf24', borderColor: 'rgba(251,191,36,0.25)', background: 'rgba(251,191,36,0.06)' }}>
-                  Odds TBD
+                  style={{ color: GOLD, borderColor: 'rgba(245,158,11,0.25)', background: 'rgba(245,158,11,0.06)' }}>
+                  Odds TBD — AI uses fighter knowledge
                 </span>
               )}
             </div>
@@ -239,14 +205,8 @@ function CardTab({
         </div>
       ) : null}
 
-      {/* Fight cards */}
-      {!selectedEvent?.hasOdds ? (
-        <div className="rounded-2xl border p-14 text-center" style={{ borderColor: 'rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.01)' }}>
-          <p className="text-3xl mb-3">🥊</p>
-          <p className="font-black uppercase tracking-tight text-white mb-2">Card Not Live Yet</p>
-          <p className="text-xs font-mono text-white/30">Odds will appear once lines open for this event.</p>
-        </div>
-      ) : isLoadingCard ? (
+      {/* Fights */}
+      {isLoadingCard ? (
         <div className="space-y-3">
           {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-28 w-full rounded-2xl bg-white/[0.04]" />)}
         </div>
@@ -255,8 +215,10 @@ function CardTab({
           {eventCard.fights.map((fight: any) => <FightRow key={fight.id} fight={fight} />)}
         </div>
       ) : (
-        <div className="rounded-2xl border p-14 text-center" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
-          <p className="font-mono text-white/30 text-sm">No fights found for this event.</p>
+        <div className="rounded-2xl border p-14 text-center" style={{ borderColor: 'rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.01)' }}>
+          <p className="text-3xl mb-3">🥊</p>
+          <p className="font-black uppercase tracking-tight text-white mb-2">Card Not Available Yet</p>
+          <p className="text-xs font-mono text-white/30">Fighter lineup hasn't been posted for this event.</p>
         </div>
       )}
     </div>

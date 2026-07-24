@@ -100,7 +100,9 @@ router.get("/events/:eventId/card", async (req, res) => {
 
     const fights = sorted.map((bout, i) => {
       const odds = findOddsMatch(bout.fighterA.name, bout.fighterB.name);
-      const fightId = odds?.id ?? bout.boutUid;
+      // Use stable name-based ID for ESPN-only bouts so analysis can be cached
+      // and looked up by fighter name. Format: espn_NameA~~NameB
+      const fightId = odds?.id ?? `espn_${bout.fighterA.name}~~${bout.fighterB.name}`;
       return {
         id: fightId,
         weightClass: "MMA",
