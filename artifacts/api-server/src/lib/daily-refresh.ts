@@ -8,11 +8,30 @@ import type { OddsFight } from "./odds.js";
 
 let isRunning = false;
 
-/** Fuzzy name match — strips non-alpha and compares */
+/** Fuzzy name match — handles ESPN variants like "Seokhyeon Ko" vs "Seok Hyun Ko",
+ *  "Jose Miguel Delgado" vs "Jose Delgado", "Levi Rodrigues Jr." vs "Levi Rodrigues" */
 function nameSim(a: string, b: string): boolean {
-  const n = (s: string) => s.toLowerCase().replace(/[^a-z]/g, "");
-  const na = n(a), nb = n(b);
-  return na === nb || na.includes(nb) || nb.includes(na);
+  const norm = (s: string) => s.toLowerCase()
+    .replace(/\bjr\.?\b|\bsr\.?\b/g, "")  // strip Jr./Sr.
+    .replace(/[^a-z]/g, "");              // strip non-alpha
+  const na = norm(a), nb = norm(b);
+  if (na === nb || na.includes(nb) || nb.includes(na)) return true;
+
+  // Token overlap: split on whitespace, check if last names match or
+  // majority of tokens overlap (handles "Jose Miguel Delgado" vs "Jose Delgado")
+  const tokA = a.toLowerCase().replace(/\bjr\.?\b|\bsr\.?\b/gi,"").trim().split(/\s+/);
+  const tokB = b.toLowerCase().replace(/\bjr\.?\b|\bsr\.?\b/gi,"").trim().split(/\s+/);
+  const normTok = (t: string) => t.replace(/[^a-z]/g, "");
+  const setA = new Set(tokA.map(normTok).filter(Boolean));
+  const setB = new Set(tokB.map(normTok).filter(Boolean));
+  // Last names must match
+  const lastA = normTok(tokA[tokA.length - 1] ?? "");
+  const lastB = normTok(tokB[tokB.length - 1] ?? "");
+  if (lastA && lastB && lastA === lastB) return true;
+  // Or majority of the shorter name's tokens appear in the longer
+  const [shorter, longer] = setA.size <= setB.size ? [setA, setB] : [setB, setA];
+  const overlap = [...shorter].filter((t) => longer.has(t)).length;
+  return overlap >= Math.ceil(shorter.size * 0.6);
 }
 
 /** Check ESPN results for pending picks. Pass force=true to bypass the time gate. */

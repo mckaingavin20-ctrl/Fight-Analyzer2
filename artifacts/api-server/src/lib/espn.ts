@@ -168,6 +168,9 @@ export async function getEspnEventCard(
 
 /**
  * Fetch completed bout results for a past event date.
+ * Uses the /scoreboard endpoint which returns per-competition results with athlete names.
+ * Checks the day before, event day, and day after to catch late-night main cards that
+ * ESPN timestamps on the next UTC day.
  * Returns array of { fighterA, fighterB, winner } — winner is null if fight not yet completed.
  */
 export async function getEspnBoutResults(
@@ -175,50 +178,62 @@ export async function getEspnBoutResults(
 ): Promise<Array<{ fighterA: string; fighterB: string; winner: string | null }>> {
   const d = new Date(eventDate);
   const dayBefore = new Date(d.getTime() - 24 * 60 * 60 * 1000);
-  const dates = Array.from(new Set([dateStr(dayBefore), dateStr(d)]));
+  const dayAfter  = new Date(d.getTime() + 24 * 60 * 60 * 1000);
+  const dates = Array.from(new Set([dateStr(dayBefore), dateStr(d), dateStr(dayAfter)]));
 
-  interface EspnCompetitorFull {
-    id: string;
-    displayName: string;
-    homeAway: string;
+  interface EspnCompetitor {
+    homeAway?: string;
     winner?: boolean;
+    athlete?: { displayName?: string };
+    displayName?: string;
   }
-  interface EspnBoutRaw {
-    uid: string;
-    date: string;
-    competitors: EspnCompetitorFull[];
+  interface EspnCompetition {
+    id: string;
+    competitors?: EspnCompetitor[];
   }
-  interface EspnEventsResponse {
-    events?: EspnBoutRaw[];
+  interface EspnScoreboardEvent {
+    id: string;
+    competitions?: EspnCompetition[];
+  }
+  interface EspnScoreboardResponse {
+    events?: EspnScoreboardEvent[];
   }
 
-  const seen = new Set<string>();
+  const seen = new Set<string>(); // dedup by competition id
   const results: Array<{ fighterA: string; fighterB: string; winner: string | null }> = [];
 
   for (const dateParam of dates) {
     try {
-      const res = await axios.get<EspnEventsResponse>(`${ESPN_BASE}/events`, {
+      // /scoreboard returns per-competition entries with athlete.displayName
+      const res = await axios.get<EspnScoreboardResponse>(`${ESPN_BASE}/scoreboard`, {
         params: { dates: dateParam },
         timeout: 12000,
       });
-      for (const b of res.data.events ?? []) {
-        if (seen.has(b.uid)) continue;
-        seen.add(b.uid);
-        const home = b.competitors.find((c) => c.homeAway === "home") ?? b.competitors[0];
-        const away = b.competitors.find((c) => c.homeAway === "away") ?? b.competitors[1];
-        if (!home || !away) continue;
-        const winner = b.competitors.find((c) => c.winner === true);
-        results.push({
-          fighterA: home.displayName,
-          fighterB: away.displayName,
-          winner: winner?.displayName ?? null,
-        });
+      for (const ev of res.data.events ?? []) {
+        for (const comp of ev.competitions ?? []) {
+          if (seen.has(comp.id)) continue;
+          seen.add(comp.id);
+          const cs = comp.competitors ?? [];
+          // Name lives in competitor.athlete.displayName; fall back to top-level displayName
+          const getName = (c: EspnCompetitor) =>
+            c.athlete?.displayName ?? c.displayName ?? "";
+          const home = cs.find((c) => c.homeAway === "home") ?? cs[0];
+          const away = cs.find((c) => c.homeAway === "away") ?? cs[1];
+          if (!home || !away) continue;
+          const winnerComp = cs.find((c) => c.winner === true);
+          results.push({
+            fighterA: getName(home),
+            fighterB: getName(away),
+            winner: winnerComp ? getName(winnerComp) : null,
+          });
+        }
       }
     } catch (err) {
-      logger.warn({ err, dateParam }, "ESPN results fetch failed for date");
+      logger.warn({ err, dateParam }, "ESPN scoreboard results fetch failed for date");
     }
   }
 
+  logger.info({ count: results.length, dates }, "ESPN bout results fetched from scoreboard");
   return results;
 }
 
