@@ -95,22 +95,71 @@ async function get(url: string, retries = 2): Promise<string> {
   throw lastErr;
 }
 
-/** Search Sherdog for a fighter, return their profile URL slug (e.g. /fighter/Dricus-Du-Plessis-146193) */
-async function searchFighter(name: string): Promise<string | null> {
-  const query = encodeURIComponent(name);
-  const html = await get(`${SHERDOG_BASE}/stats/fightfinder?SearchTxt=${query}`);
+/**
+ * Generate name search variations to handle international fighter names:
+ * - Accents removed (José → Jose, Renato Moicano → Renato Moicano)
+ * - Last name only (great for Russian/Kazakh fighters: Ankalaev)
+ * - First + last only (skip middle names)
+ * - Reversed order (some databases store Last, First)
+ * - Hyphenated name flattened
+ */
+function generateNameVariations(name: string): string[] {
+  const variations: string[] = [name];
+
+  // Remove diacritics/accents
+  const noAccents = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (noAccents !== name) variations.push(noAccents);
+
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    // Last name only — works well for Russian/Kazakh names
+    variations.push(parts[parts.length - 1]);
+    // Last name without accents
+    const lastName = parts[parts.length - 1].normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    if (lastName !== parts[parts.length - 1]) variations.push(lastName);
+    // First + Last only (drop middle names/particles)
+    if (parts.length > 2) variations.push(`${parts[0]} ${parts[parts.length - 1]}`);
+    // Drop short particles like "de", "do", "da", "dos", "du", "van", "von"
+    const filtered = parts.filter(p => p.length > 2 || /^[A-Z]/.test(p));
+    if (filtered.length !== parts.length && filtered.length >= 2) {
+      variations.push(filtered.join(" "));
+    }
+    // Reversed (Last First)
+    if (parts.length === 2) variations.push(`${parts[1]} ${parts[0]}`);
+  }
+
+  // Deduplicate, keep original first
+  return [...new Set(variations)];
+}
+
+/** Search Sherdog for a fighter with a single query, return profile URL slug */
+async function searchFighterOnce(query: string): Promise<string | null> {
+  const html = await get(`${SHERDOG_BASE}/stats/fightfinder?SearchTxt=${encodeURIComponent(query)}`);
   const $ = cheerio.load(html);
 
-  // Table rows in .fightfinder_result — grab the first result
   const firstRow = $("table.fightfinder_result tr:not(.table_head)").first();
   if (!firstRow.length) return null;
-
-  // The onclick or the anchor href
   const anchor = firstRow.find("td a").first();
   const href = anchor.attr("href");
   if (!href) return null;
-
   return href.startsWith("/") ? href : `/${href}`;
+}
+
+/** Search Sherdog for a fighter, trying multiple name variations */
+async function searchFighter(name: string): Promise<string | null> {
+  const variations = generateNameVariations(name);
+  for (const v of variations) {
+    try {
+      const result = await searchFighterOnce(v);
+      if (result) {
+        if (v !== name) logger.info({ original: name, usedVariation: v }, "Sherdog: found via name variation");
+        return result;
+      }
+    } catch {
+      // continue to next variation
+    }
+  }
+  return null;
 }
 
 /** Parse a Sherdog fighter profile page */

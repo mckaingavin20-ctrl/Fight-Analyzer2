@@ -7,6 +7,12 @@ import type { SherdogFighterData } from "./sherdog.js";
 import { getFighterData, formatSherdogContext } from "./sherdog.js";
 import type { UfcStatsFighterStats } from "./ufcstats.js";
 import { getFighterStats, formatUfcStatsContext } from "./ufcstats.js";
+import { getUfcRankings, lookupRanking, formatRankingContext } from "./ufc-rankings.js";
+import { getTapologyData, formatTapologyContext } from "./tapology.js";
+import { getMmaDecisionsData, formatMmaDecisionsContext } from "./mma-decisions.js";
+import { getBfoData, formatBfoContext } from "./bestfightodds.js";
+import { getFightMatrixData, formatFightMatrixContext } from "./fightmatrix.js";
+import { getEspnFighterDetail, formatEspnFighterContext } from "./espn-fighter.js";
 import { recordPick } from "./picks-tracker.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -261,6 +267,15 @@ function computeMatchupMetrics(
 }
 
 // ── Prompt builder ─────────────────────────────────────────────────────
+interface ExtraSources {
+  rankA: string | null; rankB: string | null;
+  tapCtxA: string | null; tapCtxB: string | null;
+  decCtxA: string | null; decCtxB: string | null;
+  espnCtxA: string | null; espnCtxB: string | null;
+  bfoCtxA: string | null; bfoCtxB: string | null;
+  fmCtxA: string | null; fmCtxB: string | null;
+}
+
 function buildPrompt(
   fighterA: string,
   fighterB: string,
@@ -276,8 +291,24 @@ function buildPrompt(
   ufcStatsA: string | null,
   ufcStatsB: string | null,
   metricsBlock: string,
-  isMainEvent: boolean
+  isMainEvent: boolean,
+  extra: ExtraSources = {
+    rankA: null, rankB: null,
+    tapCtxA: null, tapCtxB: null,
+    decCtxA: null, decCtxB: null,
+    espnCtxA: null, espnCtxB: null,
+    bfoCtxA: null, bfoCtxB: null,
+    fmCtxA: null, fmCtxB: null,
+  }
 ): string {
+
+  // UFC Rankings block
+  const rankingLines: string[] = [];
+  if (extra.rankA) rankingLines.push(extra.rankA);
+  if (extra.rankB) rankingLines.push(extra.rankB);
+  const rankingBlock = rankingLines.length
+    ? `\n=== UFC OFFICIAL RANKINGS ===\n${rankingLines.join("\n")}\n(Ranking is a MAJOR contextual signal — champions and top-5 fighters have proven elite-level competition)\n=== END RANKINGS ===\n`
+    : "";
 
   // UFCStats block
   const ufcStatsBlock = (ufcStatsA || ufcStatsB)
@@ -291,16 +322,42 @@ function buildPrompt(
       ].join("\n")
     : "";
 
+  // Build supplemental source blocks for each fighter
+  const buildSupplemental = (name: string, tap: string | null, dec: string | null, espn: string | null, bfo: string | null, fm: string | null): string => {
+    const parts: string[] = [];
+    if (tap)  parts.push(`[Tapology] ${tap}`);
+    if (dec)  parts.push(`[MMADecisions] ${dec}`);
+    if (espn) parts.push(`[ESPN] ${espn}`);
+    if        (bfo)  parts.push(`[BestFightOdds] ${bfo}`);
+    if (fm)   parts.push(`[FightMatrix] ${fm}`);
+    return parts.length ? `Supplemental sources for ${name}:\n${parts.join("\n")}` : "";
+  };
+
+  const suppA = buildSupplemental(fighterA, extra.tapCtxA, extra.decCtxA, extra.espnCtxA, extra.bfoCtxA, extra.fmCtxA);
+  const suppB = buildSupplemental(fighterB, extra.tapCtxB, extra.decCtxB, extra.espnCtxB, extra.bfoCtxB, extra.fmCtxB);
+  const supplementalBlock = (suppA || suppB)
+    ? `\n=== SUPPLEMENTAL DATA SOURCES (Tapology · MMADecisions · ESPN · BestFightOdds · FightMatrix) ===\n${suppA}\n${suppB}\n=== END SUPPLEMENTAL ===\n`
+    : "";
+
+  // If NEITHER Sherdog NOR UFCStats is available, tell AI to rely on training knowledge
+  const noStructuredData = !sherdogA && !sherdogB && !ufcStatsA && !ufcStatsB;
+  const trainingKnowledgeNote = noStructuredData
+    ? `\n⚠ NOTE: No structured database records retrieved for this matchup. Use your training knowledge about these fighters — their records, style, recent fights, and known tendencies. Be explicit that this analysis is based on AI training knowledge rather than real-time database lookup.\n`
+    : "";
+
   const dataBlock = [
+    rankingBlock,
     metricsBlock,
+    trainingKnowledgeNote,
     ufcStatsBlock,
+    supplementalBlock,
     "=== FIGHT RECORD DATA (SHERDOG) ===",
     `\n--- ${fighterA} ---`,
     sherdogA ?? "No Sherdog data — use your training knowledge for this fighter.",
     `\n--- ${fighterB} ---`,
     sherdogB ?? "No Sherdog data — use your training knowledge for this fighter.",
     "=== END SHERDOG DATA ===",
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 
   const underdogResearch = `
 === FIGHT ANALYSIS FRAMEWORK ===
@@ -427,31 +484,89 @@ async function callAI(fight: OddsFight, weightClass: string): Promise<DeepAnalys
     dogImpliedPct = 100 - favImpliedPct;
   }
 
-  // Fetch Sherdog + UFCStats in parallel for both fighters
+  // ── Fetch ALL sources in parallel — 10 data sources ──────────────────
   logger.info(
     { fighterA: fight.fighterA, fighterB: fight.fighterB, favorite, underdog },
-    "Fetching fighter data (Sherdog + UFCStats) — favorite/underdog identified"
+    "Fetching fighter data from 10 sources in parallel"
   );
 
-  const [dataA, dataB, statsA, statsB] = await Promise.allSettled([
+  // Get ESPN IDs from fight metadata if available (passed via fight object extension)
+  const espnIdA = (fight as any).espnIdA as string | undefined;
+  const espnIdB = (fight as any).espnIdB as string | undefined;
+
+  const [
+    dataA, dataB,         // Sherdog (1, 2)
+    statsA, statsB,       // UFCStats (3, 4)
+    rankings,             // UFC Rankings (5)
+    tapA, tapB,           // Tapology (6, 7)
+    decA, decB,           // MMADecisions (8, 9)
+    espnA, espnB,         // ESPN Fighter Stats (10, 11)
+    bfoA, bfoB,           // BestFightOdds (12, 13)
+    fmA, fmB,             // FightMatrix (14, 15)
+  ] = await Promise.allSettled([
     getFighterData(fight.fighterA),
     getFighterData(fight.fighterB),
     getFighterStats(fight.fighterA),
     getFighterStats(fight.fighterB),
+    getUfcRankings(),
+    getTapologyData(fight.fighterA),
+    getTapologyData(fight.fighterB),
+    getMmaDecisionsData(fight.fighterA),
+    getMmaDecisionsData(fight.fighterB),
+    espnIdA ? getEspnFighterDetail(espnIdA) : Promise.resolve(null),
+    espnIdB ? getEspnFighterDetail(espnIdB) : Promise.resolve(null),
+    getBfoData(fight.fighterA),
+    getBfoData(fight.fighterB),
+    getFightMatrixData(fight.fighterA),
+    getFightMatrixData(fight.fighterB),
   ]);
 
-  const rawDataA  = dataA.status  === "fulfilled" ? dataA.value  : null;
-  const rawDataB  = dataB.status  === "fulfilled" ? dataB.value  : null;
-  const rawStatsA = statsA.status === "fulfilled" ? statsA.value : null;
-  const rawStatsB = statsB.status === "fulfilled" ? statsB.value : null;
+  const rawDataA   = dataA.status    === "fulfilled" ? dataA.value    : null;
+  const rawDataB   = dataB.status    === "fulfilled" ? dataB.value    : null;
+  const rawStatsA  = statsA.status   === "fulfilled" ? statsA.value   : null;
+  const rawStatsB  = statsB.status   === "fulfilled" ? statsB.value   : null;
+  const allRankings = rankings.status === "fulfilled" ? (rankings.value ?? []) : [];
+  const rawTapA    = tapA.status     === "fulfilled" ? tapA.value     : null;
+  const rawTapB    = tapB.status     === "fulfilled" ? tapB.value     : null;
+  const rawDecA    = decA.status     === "fulfilled" ? decA.value     : null;
+  const rawDecB    = decB.status     === "fulfilled" ? decB.value     : null;
+  const rawEspnA   = espnA.status    === "fulfilled" ? espnA.value    : null;
+  const rawEspnB   = espnB.status    === "fulfilled" ? espnB.value    : null;
+  const rawBfoA    = bfoA.status     === "fulfilled" ? bfoA.value     : null;
+  const rawBfoB    = bfoB.status     === "fulfilled" ? bfoB.value     : null;
+  const rawFmA     = fmA.status      === "fulfilled" ? fmA.value      : null;
+  const rawFmB     = fmB.status      === "fulfilled" ? fmB.value      : null;
 
-  const sherdogA  = rawDataA  ? formatSherdogContext(rawDataA)   : null;
-  const sherdogB  = rawDataB  ? formatSherdogContext(rawDataB)   : null;
-  const ufcStatsA = rawStatsA ? formatUfcStatsContext(rawStatsA) : null;
-  const ufcStatsB = rawStatsB ? formatUfcStatsContext(rawStatsB) : null;
+  // Format each source
+  const sherdogA   = rawDataA  ? formatSherdogContext(rawDataA)   : null;
+  const sherdogB   = rawDataB  ? formatSherdogContext(rawDataB)   : null;
+  const ufcStatsA  = rawStatsA ? formatUfcStatsContext(rawStatsA) : null;
+  const ufcStatsB  = rawStatsB ? formatUfcStatsContext(rawStatsB) : null;
+  const rankEntryA = lookupRanking(fight.fighterA, allRankings);
+  const rankEntryB = lookupRanking(fight.fighterB, allRankings);
+  const rankA      = formatRankingContext(rankEntryA, fight.fighterA);
+  const rankB      = formatRankingContext(rankEntryB, fight.fighterB);
+  const tapCtxA    = rawTapA  ? formatTapologyContext(rawTapA)           : null;
+  const tapCtxB    = rawTapB  ? formatTapologyContext(rawTapB)           : null;
+  const decCtxA    = rawDecA  ? formatMmaDecisionsContext(rawDecA)       : null;
+  const decCtxB    = rawDecB  ? formatMmaDecisionsContext(rawDecB)       : null;
+  const espnCtxA   = rawEspnA ? formatEspnFighterContext(rawEspnA)       : null;
+  const espnCtxB   = rawEspnB ? formatEspnFighterContext(rawEspnB)       : null;
+  const bfoCtxA    = rawBfoA  ? formatBfoContext(rawBfoA)                : null;
+  const bfoCtxB    = rawBfoB  ? formatBfoContext(rawBfoB)                : null;
+  const fmCtxA     = rawFmA   ? formatFightMatrixContext(rawFmA)         : null;
+  const fmCtxB     = rawFmB   ? formatFightMatrixContext(rawFmB)         : null;
 
-  // Whether this looks like a main event (order 0 in card, or no oddsB meaning single fight)
-  const isMainEvent = false; // We don't have card position in callAI; assume 3-round default
+  // Log source coverage
+  const sourcesA = [sherdogA && "Sherdog", ufcStatsA && "UFCStats", rankA && "Rankings",
+    tapCtxA && "Tapology", decCtxA && "MMADecisions", espnCtxA && "ESPN", bfoCtxA && "BFO", fmCtxA && "FightMatrix"].filter(Boolean);
+  const sourcesB = [sherdogB && "Sherdog", ufcStatsB && "UFCStats", rankB && "Rankings",
+    tapCtxB && "Tapology", decCtxB && "MMADecisions", espnCtxB && "ESPN", bfoCtxB && "BFO", fmCtxB && "FightMatrix"].filter(Boolean);
+  logger.info({ fighter: fight.fighterA, sources: sourcesA }, "Data sources loaded for fighter A");
+  logger.info({ fighter: fight.fighterB, sources: sourcesB }, "Data sources loaded for fighter B");
+
+  // Whether this looks like a main event
+  const isMainEvent = false;
 
   // Pre-compute matchup metrics block for the AI prompt
   const metricsBlock = computeMatchupMetrics(
@@ -461,15 +576,6 @@ async function callAI(fight: OddsFight, weightClass: string): Promise<DeepAnalys
     isMainEvent
   );
 
-  if (sherdogA)  logger.info({ fighter: fight.fighterA }, "Sherdog data included");
-  else           logger.warn({ fighter: fight.fighterA }, "No Sherdog data");
-  if (ufcStatsA) logger.info({ fighter: fight.fighterA }, "UFCStats data included");
-  else           logger.warn({ fighter: fight.fighterA }, "No UFCStats data");
-  if (sherdogB)  logger.info({ fighter: fight.fighterB }, "Sherdog data included");
-  else           logger.warn({ fighter: fight.fighterB }, "No Sherdog data");
-  if (ufcStatsB) logger.info({ fighter: fight.fighterB }, "UFCStats data included");
-  else           logger.warn({ fighter: fight.fighterB }, "No UFCStats data");
-
   logger.info(
     { fightId: fight.id, fighterA: fight.fighterA, fighterB: fight.fighterB },
     "Calling Replit AI for fight analysis"
@@ -477,7 +583,7 @@ async function callAI(fight: OddsFight, weightClass: string): Promise<DeepAnalys
 
   const response = await openai.chat.completions.create({
     model: AI_MODEL,
-    max_completion_tokens: 5000,
+    max_completion_tokens: 6000,
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
       {
@@ -497,7 +603,10 @@ async function callAI(fight: OddsFight, weightClass: string): Promise<DeepAnalys
           ufcStatsA,
           ufcStatsB,
           metricsBlock,
-          isMainEvent
+          isMainEvent,
+          // Extra sources
+          { rankA, rankB, tapCtxA, tapCtxB, decCtxA, decCtxB,
+            espnCtxA, espnCtxB, bfoCtxA, bfoCtxB, fmCtxA, fmCtxB }
         ),
       },
     ],

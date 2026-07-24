@@ -144,23 +144,46 @@ function writeFighterCache(name: string, data: UfcStatsFighterStats): void {
 }
 
 // ── Fighter search ─────────────────────────────────────────────────────
+
+/** Normalize name for comparison: strip accents, lowercase, letters only */
+function normName(s: string): string {
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z]/g, "");
+}
+
+/** Token overlap ratio — how many words in `a` appear in `b` and vice versa */
+function tokenOverlap(a: string, b: string): number {
+  const ta = a.toLowerCase().split(/\s+/);
+  const tb = b.toLowerCase().split(/\s+/);
+  const setB = new Set(tb);
+  const hits = ta.filter(t => t.length > 2 && setB.has(t)).length;
+  return hits / Math.max(ta.length, tb.length, 1);
+}
+
 function nameSim(a: string, b: string): boolean {
-  const n = (s: string) => s.toLowerCase().replace(/[^a-z]/g, "");
-  const na = n(a), nb = n(b);
-  return na === nb || na.includes(nb) || nb.includes(na);
+  const na = normName(a), nb = normName(b);
+  if (na === nb) return true;
+  if (na.includes(nb) || nb.includes(na)) return true;
+  // Token overlap (handles "Charles Oliveira" vs "Charles do Bronx Oliveira")
+  if (tokenOverlap(a, b) >= 0.6) return true;
+  return false;
 }
 
 /**
  * Candidate letters to try for a fighter name, in order:
  * last-name first letter, second-to-last word, first-name first letter.
+ * Also tries accent-normalized first letters.
  * Handles compound last names (Du Plessis → d or p), Brazilian names, etc.
  */
 function candidateLetters(fullName: string): string[] {
-  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  const normalized = fullName.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const parts = normalized.trim().split(/\s+/).filter(Boolean);
+  const original = fullName.trim().split(/\s+/).filter(Boolean);
   const letters = new Set<string>();
   if (parts.length >= 1) letters.add(parts[parts.length - 1][0].toLowerCase()); // last word
   if (parts.length >= 2) letters.add(parts[parts.length - 2][0].toLowerCase()); // second-to-last
   if (parts.length >= 1) letters.add(parts[0][0].toLowerCase());                // first name
+  // Original (pre-normalization) letters too
+  for (const p of original) if (p.length > 0) letters.add(p[0].toLowerCase());
   return Array.from(letters).filter((l) => /[a-z]/.test(l));
 }
 
