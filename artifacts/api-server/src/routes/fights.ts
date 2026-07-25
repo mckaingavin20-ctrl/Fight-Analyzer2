@@ -125,9 +125,12 @@ router.get("/fights/:fightId/analysis", async (req, res) => {
     return res.json(buildAnalysisResponse(fightId, null, cached));
   }
 
+  // Attach isMainEvent flag if front-end passes ?main=1
+  const fightWithMeta = { ...fight, isMainEvent: req.query.main === "1" };
+
   // Deduplicate concurrent requests
   if (!inFlight.has(fightId)) {
-    const promise = generateDeepAnalysis(fight, "MMA").finally(() => inFlight.delete(fightId));
+    const promise = generateDeepAnalysis(fightWithMeta, "MMA").finally(() => inFlight.delete(fightId));
     inFlight.set(fightId, promise);
   }
 

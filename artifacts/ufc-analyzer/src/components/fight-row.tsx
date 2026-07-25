@@ -3,8 +3,8 @@ import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis,
   ResponsiveContainer, Legend,
 } from 'recharts';
-import { useGetFightAnalysis, getGetFightAnalysisQueryKey } from '@workspace/api-client-react';
-import { useQueryClient } from '@tanstack/react-query';
+import { getGetFightAnalysisQueryKey } from '@workspace/api-client-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { FightCard, FighterStats } from '@workspace/api-client-react/src/generated/api.schemas';
 import {
   ChevronDown, ChevronUp, AlertCircle, ShieldAlert,
@@ -113,12 +113,16 @@ export function FightRow({ fight: rawFight }: { fight: FightCard }) {
   const [isRefreshing, setIsRefreshing]         = useState(false);
   const qc = useQueryClient();
 
-  const { data: rawAnalysis, isLoading, isError } = useGetFightAnalysis(fight.id, {
-    query: {
-      enabled: !!fight.id && !isCompleted,
-      queryKey: getGetFightAnalysisQueryKey(fight.id),
-      staleTime: 1000 * 60 * 60,
-    }
+  const analysisUrl = `${BASE}/api/fights/${encodeURIComponent(fight.id)}/analysis${fight.isMain ? '?main=1' : ''}`;
+  const { data: rawAnalysis, isLoading, isError } = useQuery<RichAnalysis>({
+    queryKey: [...getGetFightAnalysisQueryKey(fight.id), fight.isMain ? 'main' : 'prelim'],
+    queryFn: async ({ signal }) => {
+      const r = await fetch(analysisUrl, { signal });
+      if (!r.ok) throw new Error(`Analysis fetch failed: ${r.status}`);
+      return r.json() as Promise<RichAnalysis>;
+    },
+    enabled: !!fight.id && !isCompleted,
+    staleTime: 1000 * 60 * 60,
   });
 
   /* ── Force-refresh analysis ─────────────────────────────────────── */

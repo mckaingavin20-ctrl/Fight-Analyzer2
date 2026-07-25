@@ -144,21 +144,108 @@ Loss Method breakdown: HOW they lose is more predictive than their record. Repea
 Reach advantage: every inch of reach is meaningful at range. >3" is a significant striking range edge.
 Stance matchup: Orthodox vs Southpaw creates power-shot angles that favor the southpaw's lead left hand and right overhand. Flag this explicitly.
 Age gap: fighters 32+ show measurable decline in reaction time, chin, and cardio. A 6+ year age gap favors the younger fighter in competitive matchups.
-Layoff rust: fighters returning from 12+ month layoffs underperform in the first 2 rounds before settling in. Flag long layoffs explicitly.
+Layoff rust: fighters returning from 12+ month layoffs underperform in the first 2 rounds before settling in. Flag long layoffs explicitly. If BOTH fighters are coming off long layoffs, the one with the longer layoff has MORE rust risk.
 
 ═══ FIGHT STRUCTURE FACTORS ═══
 3-round fights: early finishes are most common in rounds 1-2. Cardio matters less; first-round momentum is critical.
-5-round fights (main events): cardio, championship rounds (4-5), and the ability to adapt mid-fight are decisive. A slower starter with elite cardio often beats an explosive opener.
+5-round fights (main events / title fights): cardio, championship rounds (4-5), and the ability to adapt mid-fight are decisive. A slower starter with elite cardio often beats an explosive opener. Finishing ability in late rounds is a major edge.
 Home country / crowd effects: fighters in their home country show measurable performance uplift, especially in close fights.
+
+═══ MOMENTUM & FORM ═══
+A fighter on a 3+ fight WIN streak at elite level has current momentum — their game is sharp and evolving.
+A fighter on a LOSING streak may have identified, exploitable weaknesses that opponents are now consistently game-planning around. This is a real signal, not noise.
+A comeback fighter returning after a long layoff on a win streak may still carry ring rust in a step-up fight.
+Recent form (last 3 fights) outweighs career stats for fighters who have clearly evolved or declined.
+
+═══ BETTING LINE MOVEMENT (BestFightOdds) ═══
+The opening line reflects the book's initial assessment. The closing line reflects where sharp/professional money landed.
+- Fighter's line SHORTENING (e.g. +200 → +120): sharp money backs them. This is a meaningful secondary signal.
+- Fighter's line LENGTHENING (e.g. -300 → -180): sharp money fading them, or news of injury/weight issue leaked.
+- Large line moves (>60 points American) on a fighter = strong sharp consensus. Weight it.
+- If a fighter is consistently a CLOSING LINE underdog who beats their closing line (wins or covers), that's a real market edge signal.
+
+═══ ALGORITHMIC RATINGS (FightMatrix Elo) ═══
+FightMatrix Elo reflects cumulative performance vs. rated competition. Higher = consistently beat better opponents.
+- A >150 point Elo gap is a significant algorithmic edge; >300 points is dominant.
+- Elo is most reliable for veterans with 10+ rated fights. Treat it as a tie-breaker, not a primary signal.
+- A lower-ranked fighter beating a much higher Elo opponent IS the upset — it's rare and noteworthy.
+
+═══ CAMP & COACHING QUALITY (Tapology) ═══
+Elite camps create systematic advantages in specific areas. Flag mismatches:
+- Top wrestling/MMA camps (AKA, Sanford MMA, Elevation, Serra-Longo): systematic TD improvement, elite defense drilling
+- Top striking camps (City Kickboxing, Tristar, Saenchai gym): technical striking evolution over career
+- A fighter who recently moved to an elite camp (1-2 years ago) may show improvement not yet reflected in career averages
+- A solo-trained or small-gym fighter facing an elite-camp fighter in a grappling-intensive matchup is a real disadvantage signal
+
+═══ WEIGHT CLASS KO VARIANCE ═══
+Heavyweight / Light Heavyweight: single-punch KO is ALWAYS live regardless of odds. Even -500 favorites can be one-punched. Temper "strong" confidence for pure striker favorites in these divisions; every fighter has a puncher's chance.
+Middleweight and below: fights more often decided by volume, grappling, and technical precision. Pure KO fluke is less common below 205 lbs.
 
 ═══ STATISTICAL PREDICTORS (ranked by importance) ═══
 1. Strike differential (net SLpM) — best single predictor of fight outcome
 2. Takedown defense when combined with the opponent's TD offense
 3. Finish method match: underdog's win method matches favorite's loss method → upset alert
 4. Significant physical advantage (reach >4", age gap >6 years)
-5. Recency and layoff (fresh vs rusty)
+5. Recency, layoff, and current form (fresh vs rusty, hot streak vs cold)
+6. Line movement — where did sharp money land?
+7. Common opponents — how did each perform vs shared competition?
 
 Respond ONLY with valid JSON. No markdown, no code fences, no prose outside the JSON.`;
+
+// ── Helper: parse Sherdog date string ─────────────────────────────────
+function parseSherdogDateStr(dateStr: string): Date | null {
+  try {
+    const d = new Date(dateStr.replace(/\./g, ""));
+    return isNaN(d.getTime()) ? null : d;
+  } catch { return null; }
+}
+
+// ── Helper: compute current win/loss streak from recentFights ─────────
+function computeStreak(fights: SherdogFighterData["recentFights"]): string {
+  const active = fights.filter(f => f.result === "win" || f.result === "loss");
+  if (!active.length) return "unknown";
+  const first = active[0].result;
+  let count = 0;
+  for (const f of active) {
+    if (f.result !== first) break;
+    count++;
+  }
+  return `${count}-fight ${first === "win" ? "WIN STREAK 🔥" : "LOSING STREAK ⚠"}`;
+}
+
+// ── Helper: pre-compute real common opponents from Sherdog records ─────
+function findCommonOpponents(
+  fighterA: string,
+  fighterB: string,
+  sherdogA: SherdogFighterData | null,
+  sherdogB: SherdogFighterData | null,
+): string {
+  if (!sherdogA?.recentFights.length || !sherdogB?.recentFights.length) return "";
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z]/g, "");
+  const mapA = new Map<string, SherdogFighterData["recentFights"][0]>();
+  for (const f of sherdogA.recentFights) mapA.set(norm(f.opponent), f);
+
+  const shared: Array<{ opp: string; fA: SherdogFighterData["recentFights"][0]; fB: SherdogFighterData["recentFights"][0] }> = [];
+  for (const fB of sherdogB.recentFights) {
+    const key = norm(fB.opponent);
+    // Avoid matching the fighters against each other as an "opponent"
+    if (key === norm(fighterA) || key === norm(fighterB)) continue;
+    const fA = mapA.get(key);
+    if (fA) shared.push({ opp: fB.opponent, fA, fB });
+  }
+  if (!shared.length) return "";
+
+  const lines = ["=== PRE-COMPUTED COMMON OPPONENTS (real tape from Sherdog) ===",
+    "These are verified shared opponents — use them as the primary basis for commonOpponents in your response.",
+    "Compare HOW each fighter won/lost (round, method, damage taken), not just the result."];
+  for (const { opp, fA, fB } of shared.slice(0, 4)) {
+    const rA = `${fA.result.toUpperCase()} (${fA.method}${fA.round ? ` R${fA.round}` : ""}, ${fA.date})`;
+    const rB = `${fB.result.toUpperCase()} (${fB.method}${fB.round ? ` R${fB.round}` : ""}, ${fB.date})`;
+    lines.push(`  vs ${opp}: ${fighterA} → ${rA} | ${fighterB} → ${rB}`);
+  }
+  lines.push("=== END COMMON OPPONENTS ===");
+  return lines.join("\n");
+}
 
 // ── Computed matchup metrics ───────────────────────────────────────────
 function computeMatchupMetrics(
@@ -262,6 +349,34 @@ function computeMatchupMetrics(
   // ── Fight structure ───────────────────────────────────────────────────
   lines.push(`Scheduled: ${isMainEvent ? "5 ROUNDS (championship/main event) — cardio, adjustments, and championship rounds 4-5 are decisive" : "3 ROUNDS — early momentum and finish rate matter more than cardio"}`);
 
+  // ── Win/loss streak and momentum ─────────────────────────────────────
+  if (sherdogA?.recentFights.length) {
+    lines.push(`${fighterA} current streak: ${computeStreak(sherdogA.recentFights)}`);
+  }
+  if (sherdogB?.recentFights.length) {
+    lines.push(`${fighterB} current streak: ${computeStreak(sherdogB.recentFights)}`);
+  }
+
+  // ── Layoff comparison ─────────────────────────────────────────────────
+  const daysSince = (sherdog: SherdogFighterData | null): number | null => {
+    if (!sherdog?.recentFights[0]?.date) return null;
+    const d = parseSherdogDateStr(sherdog.recentFights[0].date);
+    return d ? Math.floor((Date.now() - d.getTime()) / 86_400_000) : null;
+  };
+  const daysA = daysSince(sherdogA);
+  const daysB = daysSince(sherdogB);
+  if (daysA !== null && daysB !== null) {
+    const rustLabel = (d: number) =>
+      d <= 90  ? "fresh (<90d)"
+      : d <= 180 ? "normal (90-180d)"
+      : d <= 365 ? "moderate layoff (180-365d) — some ring rust likely"
+      : `LONG LAYOFF (${d}d) ⚠ — significant ring rust risk in rounds 1-2`;
+    lines.push(`Layoff comparison: ${fighterA} ${daysA}d since last fight [${rustLabel(daysA)}] | ${fighterB} ${daysB}d [${rustLabel(daysB)}]`);
+    if (daysA > 365 && daysB > 365) {
+      lines.push(`⚠ BOTH fighters have 12+ month layoffs — the fighter with more layoff (${daysA > daysB ? fighterA : fighterB}) carries greater rust risk`);
+    }
+  }
+
   lines.push("=== END COMPUTED METRICS ===");
   return lines.join("\n");
 }
@@ -291,6 +406,7 @@ function buildPrompt(
   ufcStatsA: string | null,
   ufcStatsB: string | null,
   metricsBlock: string,
+  commonOpponentsBlock: string,
   isMainEvent: boolean,
   extra: ExtraSources = {
     rankA: null, rankB: null,
@@ -348,6 +464,7 @@ function buildPrompt(
   const dataBlock = [
     rankingBlock,
     metricsBlock,
+    commonOpponentsBlock || null,
     trainingKnowledgeNote,
     ufcStatsBlock,
     supplementalBlock,
@@ -368,7 +485,7 @@ IMPORTANT: Betting markets are efficient. The favorite is favored because their 
 To pick the underdog, you must find SPECIFIC evidence from the tape — not just because upsets happen.
 ${favImpliedPct >= 70 ? `This is a HEAVY FAVORITE at ${favImpliedPct}% implied. Require a clear, documented reason to fade them.` : `This is a COMPETITIVE matchup — analyze both sides carefully.`}
 
-MANDATORY ANALYSIS — address all five in your reasoning:
+MANDATORY ANALYSIS — address ALL SEVEN in your reasoning:
 
 1. PHYSICAL EDGES (from computed metrics above): Who has reach? Age? Stance advantage?
    → These are real, consistent advantages. A 4"+ reach edge matters in striking fights.
@@ -385,7 +502,17 @@ MANDATORY ANALYSIS — address all five in your reasoning:
    → Only flag an upset if the underdog's BEST skill directly matches the favorite's DOCUMENTED weakness.
    → If they haven't shown this vulnerability before, the underdog path is theoretical, not real.
 
-5. VERDICT: Pick the fighter who has the genuine advantage.
+5. MOMENTUM & FORM: Check the pre-computed streak (from metrics above).
+   → A fighter on a 3+ fight WIN streak at this level is sharp and evolving. Weight it.
+   → A fighter on a LOSING streak has identifiable, exploitable weaknesses being game-planned. Weight it.
+   → Long layoff (365d+) = ring rust in rounds 1-2. Who is rustier? Flag explicitly.
+
+6. LINE MOVEMENT: From BestFightOdds supplemental data — which direction did the market move?
+   → Line shortening toward a fighter (e.g. +180 → +110) = sharp money on them. Secondary signal.
+   → Large movement (>60pts American) = strong market consensus. Incorporate it.
+   → No BFO data? Skip this point.
+
+7. VERDICT: Pick the fighter who has the genuine advantage.
    - If ${favorite}'s advantages are real and documented and ${underdog} has no specific counter → PICK THE FAVORITE.
    - If ${underdog} has a specific, tape-supported path AND matches ${favorite}'s loss pattern → PICK THE UNDERDOG.
    - Default is the favorite. Override only with evidence.
@@ -448,12 +575,14 @@ Required JSON structure:
 
 Rules:
 - recentForm: last 5 fights from Sherdog, most recent first, "W" or "L" only.
-- commonOpponents: up to 4 real shared opponents. [] only if genuinely none.
+- commonOpponents: ONLY use the pre-computed shared opponents from the "PRE-COMPUTED COMMON OPPONENTS" block above. If that block is present, populate it from there — do NOT invent opponents. If no shared opponents block was provided, output [].
 - You MUST pick a winner. "toss-up" is never allowed.
 - DEFAULT to the favorite unless you have SPECIFIC, DOCUMENTED tape evidence that the underdog's primary skill set exploits the favorite's loss pattern.
 - Do NOT pick underdogs by default or out of contrarianism. Being an underdog is not a reason to pick them.
-- Every keyEdge must be tied to a specific stat, physical attribute, or Sherdog record moment.
-- upsetAnalysis must have real analytical content — not boilerplate.`;
+- Every keyEdge must be tied to a specific stat, physical attribute, computed metric, or Sherdog record moment.
+- upsetAnalysis must have real analytical content — not boilerplate.
+- Your reasoning MUST reference the streak and layoff data from the computed metrics. Momentum is real.
+- If BFO line movement data is available, your reasoning MUST include one sentence on what the line movement signals.`;
 }
 
 // ── Core analysis function ────────────────────────────────────────────
@@ -565,8 +694,9 @@ async function callAI(fight: OddsFight, weightClass: string): Promise<DeepAnalys
   logger.info({ fighter: fight.fighterA, sources: sourcesA }, "Data sources loaded for fighter A");
   logger.info({ fighter: fight.fighterB, sources: sourcesB }, "Data sources loaded for fighter B");
 
-  // Whether this looks like a main event
-  const isMainEvent = false;
+  // Whether this is a main event / 5-round fight
+  // Passed as an extension field from the fights route, or set by ESPN card order (espnOrder === 0)
+  const isMainEvent: boolean = (fight as any).isMainEvent === true;
 
   // Pre-compute matchup metrics block for the AI prompt
   const metricsBlock = computeMatchupMetrics(
@@ -574,6 +704,12 @@ async function callAI(fight: OddsFight, weightClass: string): Promise<DeepAnalys
     rawDataA, rawDataB,
     rawStatsA, rawStatsB,
     isMainEvent
+  );
+
+  // Pre-compute common opponents from Sherdog records (prevents AI hallucination)
+  const commonOpponentsBlock = findCommonOpponents(
+    fight.fighterA, fight.fighterB,
+    rawDataA, rawDataB
   );
 
   logger.info(
@@ -603,6 +739,7 @@ async function callAI(fight: OddsFight, weightClass: string): Promise<DeepAnalys
           ufcStatsA,
           ufcStatsB,
           metricsBlock,
+          commonOpponentsBlock,
           isMainEvent,
           // Extra sources
           { rankA, rankB, tapCtxA, tapCtxB, decCtxA, decCtxB,
