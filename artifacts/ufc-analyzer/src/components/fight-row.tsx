@@ -4,17 +4,14 @@ import {
   ResponsiveContainer, Legend,
 } from 'recharts';
 import { useGetFightAnalysis, getGetFightAnalysisQueryKey } from '@workspace/api-client-react';
+import { useQueryClient } from '@tanstack/react-query';
 import type { FightCard, FighterStats } from '@workspace/api-client-react/src/generated/api.schemas';
 import {
   ChevronDown, ChevronUp, AlertCircle, ShieldAlert,
   Target, Swords, Users, Loader2, TrendingUp, CheckCircle2, RefreshCw,
 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Badge } from '@/components/ui/badge';
 import { FighterAvatar } from '@/components/fighter-avatar';
-import {
-  Tooltip, TooltipContent, TooltipTrigger, TooltipProvider,
-} from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 /* ── Types ─────────────────────────────────────────────────────────── */
@@ -38,18 +35,22 @@ interface RichAnalysis {
   sherdogUsed?: { fighterA: boolean; fighterB: boolean };
 }
 
-/* ── Theme constants ────────────────────────────────────────────────── */
-const GOLD         = '#f59e0b';
-const GOLD_DIM     = 'rgba(245,158,11,0.1)';
-const GOLD_BORDER  = 'rgba(245,158,11,0.28)';
-const VIOLET       = '#7c3aed';
-const VIOLET_DIM   = 'rgba(124,58,237,0.09)';
-const VIOLET_BORDER = 'rgba(124,58,237,0.28)';
-const WIN_COLOR    = '#22c55e';
-const LOSS_COLOR   = '#ef4444';
-const CARD_BG      = 'linear-gradient(180deg, #12111e 0%, #0d0c1a 100%)';
+/* ── Design tokens ──────────────────────────────────────────────────── */
+const RED         = '#E11D48';
+const RED_DIM     = 'rgba(225,29,72,0.08)';
+const RED_BORDER  = 'rgba(225,29,72,0.22)';
+const GOLD        = '#F59E0B';
+const GOLD_DIM    = 'rgba(245,158,11,0.08)';
+const GOLD_BORDER = 'rgba(245,158,11,0.22)';
+const WIN_COLOR   = '#22C55E';
+const LOSS_COLOR  = '#EF4444';
+const SURFACE     = '#111113';
+const ELEVATED    = '#18181B';
+const BORDER      = 'rgba(255,255,255,0.08)';
+const MUTED       = 'rgba(255,255,255,0.3)';
+const DIM         = 'rgba(255,255,255,0.15)';
 
-/* ── Odds helpers ──────────────────────────────────────────────────── */
+/* ── Odds helpers ───────────────────────────────────────────────────── */
 type OddsFormat = 'american' | 'decimal' | 'probability';
 function decimalToAmerican(d: number) { return d >= 2 ? `+${Math.round((d-1)*100)}` : `-${Math.round(100/(d-1))}`; }
 function decimalToImplied(d: number) { return `${Math.round((1/d)*100)}%`; }
@@ -65,13 +66,8 @@ function displayOdds(raw: string|number|undefined, format: OddsFormat): string {
   if (format === 'decimal') return d.toFixed(2);
   return `${Math.round((1/d)*100)}%`;
 }
-function displayDecimalOdds(d: number, format: OddsFormat): string {
-  if (format === 'american') return decimalToAmerican(d);
-  if (format === 'decimal') return d.toFixed(2);
-  return decimalToImplied(d);
-}
 
-/* ── Radar derivation ──────────────────────────────────────────────── */
+/* ── Radar derivation ───────────────────────────────────────────────── */
 function deriveRadar(profile: ExtendedFighterStats): RadarMetrics {
   if (profile.radarMetrics) return profile.radarMetrics;
   const sw = (profile.strengths ?? []).join(' ').toLowerCase();
@@ -79,7 +75,7 @@ function deriveRadar(profile: ExtendedFighterStats): RadarMetrics {
   const style = (profile.style ?? '').toLowerCase();
   const has = (t: string, kws: string[]) => kws.some(k => t.includes(k));
   let striking = 5;
-  if (has(sw, ['striking','boxing','kick','punch','counter','combina','accurate','muay','karate','southpaw'])) striking += 2;
+  if (has(sw, ['striking','boxing','kick','punch','counter','combina','accurate','muay','karate'])) striking += 2;
   if (has(sw, ['sharp','precise','technical','elite'])) striking += 1;
   if (has(wk, ['striking','stand-up','poor feet','feet'])) striking -= 2;
   if (has(style, ['boxer','kickboxer','muay','striker'])) striking += 1;
@@ -92,25 +88,30 @@ function deriveRadar(profile: ExtendedFighterStats): RadarMetrics {
   if (has(wk, ['gas','fade','tired','cardio','pace','late rounds','engine'])) cardio -= 2;
   let chin = 6;
   if (has(sw, ['durable','chin','never finished','never stopped','iron','granite'])) chin += 2;
-  if (has(wk, ['chin','hurt','knockdown','stopped','ko','tko','finished','wobbled','brittle'])) chin -= 2;
+  if (has(wk, ['chin','hurt','knockdown','stopped','ko','tko','finished','wobbled'])) chin -= 2;
   let power = 5;
-  if (has(sw, ['power','knockout','devastating','heavy hands','finish','one-punch','brutal','vicious'])) power += 2;
+  if (has(sw, ['power','knockout','devastating','heavy hands','finish','one-punch','brutal'])) power += 2;
   if (has(wk, ['lacks power','no ko','power'])) power -= 2;
   let defense = 5;
-  if (has(sw, ['defense','defensive','head movement','footwork','slipping','evasive','sprawl','takedown def'])) defense += 2;
+  if (has(sw, ['defense','defensive','head movement','footwork','slipping','evasive','sprawl'])) defense += 2;
   if (has(wk, ['defense','hittable','open to','leaks','wide','gets hit'])) defense -= 2;
   const clamp = (n: number) => Math.max(1, Math.min(10, Math.round(n)));
   return { striking: clamp(striking), grappling: clamp(grappling), cardio: clamp(cardio), chin: clamp(chin), power: clamp(power), defense: clamp(defense) };
 }
 
-/* ── Main component ────────────────────────────────────────────────── */
+/* ── API base ───────────────────────────────────────────────────────── */
+const BASE = (import.meta.env.BASE_URL ?? '').replace(/\/$/, '');
+
+/* ── Main component ─────────────────────────────────────────────────── */
 export function FightRow({ fight: rawFight }: { fight: FightCard }) {
   const fight = rawFight as ExtendedFightCard;
   const isCompleted = fight.pickResult === 'win' || fight.pickResult === 'loss';
 
-  const [isExpanded, setIsExpanded]           = useState(false);
-  const [oddsFormat, setOddsFormat]           = useState<OddsFormat>('american');
+  const [isExpanded, setIsExpanded]             = useState(false);
+  const [oddsFormat, setOddsFormat]             = useState<OddsFormat>('american');
   const [expandedOpponent, setExpandedOpponent] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing]         = useState(false);
+  const qc = useQueryClient();
 
   const { data: rawAnalysis, isLoading, isError } = useGetFightAnalysis(fight.id, {
     query: {
@@ -120,41 +121,56 @@ export function FightRow({ fight: rawFight }: { fight: FightCard }) {
     }
   });
 
-  /* ── Completed fight card ──────────────────────────────────────────── */
+  /* ── Force-refresh analysis ─────────────────────────────────────── */
+  async function handleRefresh(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (isRefreshing || isLoading) return;
+    setIsRefreshing(true);
+    try {
+      await fetch(`${BASE}/api/fights/${encodeURIComponent(fight.id)}/analysis`, { method: 'DELETE' });
+      await qc.invalidateQueries({ queryKey: getGetFightAnalysisQueryKey(fight.id) });
+    } finally {
+      setIsRefreshing(false);
+    }
+  }
+
+  /* ── Completed fight card ───────────────────────────────────────── */
   if (isCompleted) {
     const gpCorrect = fight.pickResult === 'win';
     const winner    = fight.pickWinner ?? '?';
     const isWinnerA = winner === fight.fighterA.name;
     return (
-      <div className="rounded-2xl overflow-hidden border" style={{
-        background: '#0e0d1b',
+      <div className="border overflow-hidden" style={{
+        background: SURFACE,
         borderColor: gpCorrect ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)',
-        opacity: 0.75,
+        opacity: 0.7,
       }}>
-        <div className="flex items-center justify-between px-4 pt-3 pb-0">
-          <span className="text-[10px] font-mono font-bold tracking-[0.18em] uppercase text-white/20">
-            {fight.isMain ? '★ MAIN · ' : ''}<span style={{ color: gpCorrect ? WIN_COLOR : LOSS_COLOR }}>FINAL</span>
+        {/* Label strip */}
+        <div className="px-4 py-2 flex items-center justify-between border-b" style={{
+          background: gpCorrect ? 'rgba(34,197,94,0.06)' : 'rgba(239,68,68,0.06)',
+          borderColor: gpCorrect ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+        }}>
+          <span style={{ fontFamily: 'var(--app-font-mono)', fontSize: '9px', letterSpacing: '0.15em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.3)' }}>
+            {fight.isMain ? '★ MAIN · ' : ''}FINAL
           </span>
-          <span className="text-[9px] font-mono font-black uppercase tracking-widest" style={{ color: gpCorrect ? WIN_COLOR : LOSS_COLOR }}>
+          <span style={{ fontFamily: 'var(--app-font-display)', fontWeight: 800, fontSize: '12px', letterSpacing: '0.08em', textTransform: 'uppercase', color: gpCorrect ? WIN_COLOR : LOSS_COLOR }}>
             {gpCorrect ? '✓ Correct' : '✗ Wrong'}
           </span>
         </div>
-        <div className="px-4 pb-2 pt-3 flex items-center gap-3">
+        {/* Fighters */}
+        <div className="px-4 py-4 flex items-center gap-2">
           {[{ f: fight.fighterA, isWinner: isWinnerA }, { f: fight.fighterB, isWinner: !isWinnerA }].map(({ f, isWinner }, i) => (
-            <div key={i} className={`flex-1 flex flex-col items-center gap-1.5 py-2 rounded-xl px-2 ${isWinner ? 'bg-white/[0.05]' : ''}`}>
+            <div key={i} className={cn('flex-1 flex flex-col items-center gap-2 py-2', isWinner && 'border-b-2')} style={isWinner ? { borderColor: gpCorrect ? WIN_COLOR : LOSS_COLOR } : {}}>
               <FighterAvatar name={f.name} espnId={f.espnId} size="md" />
-              <p className="font-black uppercase text-[11px] leading-tight tracking-tight text-center">{f.name}</p>
-              {isWinner && (
-                <span className="text-[8px] font-mono font-black uppercase tracking-widest px-2 py-0.5 rounded"
-                  style={{ background: 'rgba(34,197,94,0.12)', color: WIN_COLOR }}>WINNER</span>
-              )}
-              {i === 0 && <span className="text-[9px] font-black font-mono" style={{ color: '#252535' }}>VS</span>}
+              <span style={{ fontFamily: 'var(--app-font-display)', fontWeight: 800, fontSize: '13px', letterSpacing: '0.04em', textTransform: 'uppercase', textAlign: 'center', color: isWinner ? '#FAFAFA' : 'rgba(255,255,255,0.35)' }}>{f.name}</span>
+              {isWinner && <span style={{ fontFamily: 'var(--app-font-mono)', fontSize: '8px', letterSpacing: '0.15em', textTransform: 'uppercase', color: gpCorrect ? WIN_COLOR : LOSS_COLOR, fontWeight: 700 }}>WINNER</span>}
+              {i === 0 && <span style={{ fontFamily: 'var(--app-font-display)', fontSize: '11px', color: 'rgba(255,255,255,0.1)', fontWeight: 900 }}>VS</span>}
             </div>
           ))}
         </div>
-        <div className="px-4 py-2.5 border-t flex items-center gap-2" style={{ borderColor: 'rgba(255,255,255,0.04)' }}>
-          <span className="text-[9px] font-mono uppercase tracking-widest text-white/20">GP Pick</span>
-          <span className="text-[10px] font-black uppercase tracking-tight" style={{ color: gpCorrect ? WIN_COLOR : LOSS_COLOR }}>
+        <div className="px-4 py-2 border-t flex items-center gap-2" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+          <span style={{ fontFamily: 'var(--app-font-mono)', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'rgba(255,255,255,0.2)' }}>GP Pick</span>
+          <span style={{ fontFamily: 'var(--app-font-display)', fontWeight: 800, fontSize: '13px', letterSpacing: '0.04em', textTransform: 'uppercase', color: gpCorrect ? WIN_COLOR : LOSS_COLOR }}>
             {fight.gpPick ?? '?'}
           </span>
         </div>
@@ -165,434 +181,472 @@ export function FightRow({ fight: rawFight }: { fight: FightCard }) {
   const analysis  = rawAnalysis as RichAnalysis | undefined;
   const pick      = analysis?.lean?.fighter;
   const isPickA   = pick === fight.fighterA.name;
-  const pickColor = GOLD;
-
   const sid = (s: string) => `${fight.id}-${s}`;
   const scrollTo = (s: string) => document.getElementById(sid(s))?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   const cycleOdds = () => setOddsFormat(f => f === 'american' ? 'decimal' : f === 'decimal' ? 'probability' : 'american');
 
   return (
-    <TooltipProvider delayDuration={200}>
-      <div className="rounded-2xl overflow-hidden transition-all duration-200 border" style={{
-        background: CARD_BG,
-        borderColor: isExpanded ? VIOLET_BORDER : 'rgba(255,255,255,0.07)',
-        boxShadow: isExpanded ? `0 0 28px ${VIOLET_DIM}` : 'none',
-      }}>
-        {/* Fight label strip */}
-        <div className="flex items-center justify-between px-4 pt-3.5 pb-0">
-          <span className="text-[10px] font-mono font-bold tracking-[0.2em] uppercase" style={{ color: fight.isMain ? GOLD : '#3a3a5c' }}>
-            {fight.isMain ? '★ MAIN EVENT' : fight.weightClass || 'Prelim'}
-          </span>
+    <div className="border overflow-hidden transition-all duration-150" style={{
+      background: SURFACE,
+      borderColor: isExpanded ? RED_BORDER : BORDER,
+    }}>
+
+      {/* ── Fight label strip ── */}
+      <div className="flex items-center justify-between px-4 pt-3 pb-0">
+        <span style={{
+          fontFamily: 'var(--app-font-mono)',
+          fontSize: '9px',
+          letterSpacing: '0.18em',
+          textTransform: 'uppercase',
+          fontWeight: 700,
+          color: fight.isMain ? GOLD : 'rgba(255,255,255,0.18)',
+        }}>
+          {fight.isMain ? '★ MAIN EVENT' : fight.weightClass || 'Prelim'}
+        </span>
+        <div className="flex items-center gap-2">
           {isLoading && (
-            <span className="flex items-center gap-1 text-[9px] font-mono uppercase animate-pulse" style={{ color: VIOLET }}>
+            <span className="flex items-center gap-1 animate-pulse" style={{ fontFamily: 'var(--app-font-mono)', fontSize: '8px', letterSpacing: '0.1em', textTransform: 'uppercase', color: RED }}>
               <Loader2 className="w-2.5 h-2.5 animate-spin" /> Scouting…
             </span>
           )}
+          {!isLoading && !isCompleted && (
+            <button onClick={handleRefresh} title="Refresh analysis with latest fighter data"
+              className="p-1 hover:bg-white/5 transition-colors"
+              style={{ color: isRefreshing ? RED : 'rgba(255,255,255,0.15)' }}>
+              <RefreshCw className={cn('w-3 h-3', isRefreshing && 'animate-spin')} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── Fighter matchup (clickable) ── */}
+      <button onClick={() => setIsExpanded(!isExpanded)} className="w-full text-left px-2 pb-0 pt-2">
+
+        {/* Fighters side by side */}
+        <div className="flex items-stretch gap-0">
+          {/* Fighter A */}
+          <div className={cn('flex-1 flex flex-col items-center gap-2 py-4 px-3 transition-all', pick && isPickA ? 'border-b-2' : '')}
+            style={pick && isPickA ? { borderColor: GOLD, background: 'rgba(245,158,11,0.03)' } : {}}>
+            <div className="relative">
+              <FighterAvatar name={fight.fighterA.name} espnId={fight.fighterA.espnId} size="lg" />
+              {pick && isPickA && (
+                <div className="absolute -bottom-1 -right-1 w-5 h-5 border-2 flex items-center justify-center"
+                  style={{ background: GOLD, borderColor: SURFACE }}>
+                  <CheckCircle2 className="w-3 h-3 text-black" strokeWidth={3} />
+                </div>
+              )}
+            </div>
+            <div className="text-center">
+              <p style={{
+                fontFamily: 'var(--app-font-display)', fontWeight: 800,
+                fontSize: 'clamp(13px, 3vw, 16px)', letterSpacing: '0.02em',
+                textTransform: 'uppercase', lineHeight: 1.1,
+                color: pick && isPickA ? '#FAFAFA' : 'rgba(250,250,250,0.65)',
+              }}>{fight.fighterA.name}</p>
+              {analysis && (
+                <p style={{ fontFamily: 'var(--app-font-mono)', fontSize: '9px', color: 'rgba(255,255,255,0.25)', marginTop: '2px' }}>
+                  {analysis.fighterA.style?.split('|')[0]?.trim()}
+                </p>
+              )}
+              {fight.oddsA && (
+                <p style={{
+                  fontFamily: 'var(--app-font-mono)', fontWeight: 700,
+                  fontSize: '12px', marginTop: '4px',
+                  color: pick && isPickA ? GOLD : 'rgba(255,255,255,0.3)',
+                }}>{formatOdds(fight.oddsA)}</p>
+              )}
+            </div>
+          </div>
+
+          {/* VS divider */}
+          <div className="flex items-center justify-center w-12 shrink-0">
+            <span style={{ fontFamily: 'var(--app-font-display)', fontWeight: 900, fontSize: '11px', letterSpacing: '0.1em', color: 'rgba(255,255,255,0.1)', textTransform: 'uppercase' }}>VS</span>
+          </div>
+
+          {/* Fighter B */}
+          <div className={cn('flex-1 flex flex-col items-center gap-2 py-4 px-3 transition-all', pick && !isPickA ? 'border-b-2' : '')}
+            style={pick && !isPickA ? { borderColor: GOLD, background: 'rgba(245,158,11,0.03)' } : {}}>
+            <div className="relative">
+              <FighterAvatar name={fight.fighterB.name} espnId={fight.fighterB.espnId} size="lg" />
+              {pick && !isPickA && (
+                <div className="absolute -bottom-1 -right-1 w-5 h-5 border-2 flex items-center justify-center"
+                  style={{ background: GOLD, borderColor: SURFACE }}>
+                  <CheckCircle2 className="w-3 h-3 text-black" strokeWidth={3} />
+                </div>
+              )}
+            </div>
+            <div className="text-center">
+              <p style={{
+                fontFamily: 'var(--app-font-display)', fontWeight: 800,
+                fontSize: 'clamp(13px, 3vw, 16px)', letterSpacing: '0.02em',
+                textTransform: 'uppercase', lineHeight: 1.1,
+                color: pick && !isPickA ? '#FAFAFA' : 'rgba(250,250,250,0.65)',
+              }}>{fight.fighterB.name}</p>
+              {analysis && (
+                <p style={{ fontFamily: 'var(--app-font-mono)', fontSize: '9px', color: 'rgba(255,255,255,0.25)', marginTop: '2px' }}>
+                  {analysis.fighterB.style?.split('|')[0]?.trim()}
+                </p>
+              )}
+              {fight.oddsB && (
+                <p style={{
+                  fontFamily: 'var(--app-font-mono)', fontWeight: 700,
+                  fontSize: '12px', marginTop: '4px',
+                  color: pick && !isPickA ? GOLD : 'rgba(255,255,255,0.3)',
+                }}>{formatOdds(fight.oddsB)}</p>
+              )}
+            </div>
+          </div>
         </div>
 
-        {/* Fighter matchup */}
-        <button onClick={() => setIsExpanded(!isExpanded)} className="w-full text-left px-4 pb-0 pt-3">
-          <div className="flex items-stretch gap-3">
-            {[
-              { f: fight.fighterA, isP: isPickA },
-              { f: fight.fighterB, isP: !isPickA },
-            ].map(({ f, isP }, i) => (
-              <div key={i} className={cn(
-                'flex-1 flex flex-col items-center gap-2 pb-4 rounded-xl transition-all duration-200 px-2 pt-3',
-                pick && isP ? 'bg-white/[0.04]' : 'bg-transparent'
-              )}>
-                {i === 0 && <div />}
-                <div className="relative">
-                  <FighterAvatar name={f.name} espnId={f.espnId} size="lg" />
-                  {pick && isP && (
-                    <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-[#12111e] flex items-center justify-center"
-                      style={{ background: GOLD }}>
-                      <CheckCircle2 className="w-3 h-3 text-black" strokeWidth={3} />
-                    </div>
-                  )}
-                </div>
-                <div className="text-center">
-                  <p className="font-black uppercase text-xs sm:text-sm leading-tight tracking-tight">{f.name}</p>
-                  {(fight.oddsA || fight.oddsB) && (
-                    <p className="text-[11px] font-mono mt-0.5" style={{ color: isP && pick ? GOLD : '#3a3a5c' }}>
-                      {i === 0 && fight.oddsA ? formatOdds(fight.oddsA) : i === 1 && fight.oddsB ? formatOdds(fight.oddsB) : ''}
-                    </p>
-                  )}
-                  {analysis && (
-                    <p className="text-[10px] font-mono text-white/30 mt-0.5">
-                      {i === 0 ? analysis.fighterA.style : analysis.fighterB.style}
-                    </p>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* VS separator (injected into flex) */}
-          {/* Pick bar */}
-          <div className="mx-0 mt-0 rounded-b-xl px-4 py-2.5 flex items-center justify-between" style={{
-            background: pick ? `linear-gradient(90deg, ${GOLD_DIM}, transparent)` : 'rgba(255,255,255,0.02)',
-            borderTop: '1px solid rgba(255,255,255,0.04)',
-          }}>
-            <div className="flex items-center gap-2 min-w-0">
-              {isLoading ? (
-                <span className="text-[10px] font-mono text-white/30 uppercase tracking-widest animate-pulse">Analyzing…</span>
-              ) : isError ? (
-                <div className="flex items-center gap-1 text-red-400 text-[10px] font-mono">
-                  <AlertCircle className="w-3 h-3" /> Analysis failed
-                </div>
-              ) : pick ? (
-                <>
-                  <span className="text-[9px] font-mono font-bold uppercase tracking-[0.2em] text-white/25">Gavin's Pick</span>
-                  <span className="font-black text-xs sm:text-sm uppercase tracking-tight truncate" style={{ color: GOLD }}>{pick}</span>
-                  {analysis && <ConfidenceBadge confidence={analysis.lean.confidence} />}
-                </>
-              ) : !analysis ? (
-                <span className="text-[10px] font-mono text-white/20">Click to analyze</span>
-              ) : null}
-            </div>
-            <div style={{ color: '#2a2a44' }}>
-              {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-            </div>
-          </div>
-        </button>
-
-        {/* Expanded analysis panel */}
-        {isExpanded && (
-          <div className="border-t text-sm" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
+        {/* Pick banner */}
+        <div className="mx-0 mt-0 px-4 py-2.5 flex items-center justify-between border-t" style={{
+          borderColor: 'rgba(255,255,255,0.05)',
+          background: pick ? `linear-gradient(90deg, ${GOLD_DIM}, transparent)` : 'rgba(255,255,255,0.02)',
+        }}>
+          <div className="flex items-center gap-2.5 min-w-0">
             {isLoading ? (
-              <div className="p-5 space-y-4">
-                <div className="flex items-center gap-2 text-xs font-mono animate-pulse" style={{ color: VIOLET }}>
-                  <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-                  Deep scouting in progress… first analysis takes up to 30s.
-                </div>
-                <Skeleton className="h-5 w-1/3 bg-white/5" />
-                <Skeleton className="h-28 w-full bg-white/5" />
-                <div className="grid grid-cols-2 gap-3">
-                  <Skeleton className="h-40 bg-white/5" />
-                  <Skeleton className="h-40 bg-white/5" />
-                </div>
-              </div>
+              <span className="animate-pulse" style={{ fontFamily: 'var(--app-font-mono)', fontSize: '10px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.2)' }}>Analyzing…</span>
             ) : isError ? (
-              <div className="p-6 text-center text-white/30 font-mono text-sm">
-                <AlertCircle className="w-6 h-6 mx-auto mb-2 text-red-400" />
-                Analysis unavailable. Try again in a moment.
+              <div className="flex items-center gap-1.5" style={{ color: LOSS_COLOR }}>
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                <span style={{ fontFamily: 'var(--app-font-mono)', fontSize: '10px' }}>Analysis failed</span>
               </div>
-            ) : analysis ? (
+            ) : pick ? (
               <>
-                {/* Sticky anchor nav */}
-                <nav className="sticky top-0 z-30 flex items-center gap-0 overflow-x-auto border-b"
-                  style={{ background: '#0e0d1b', borderColor: 'rgba(255,255,255,0.06)' }}>
-                  {[
-                    { id: 'verdict', label: 'Overview' },
-                    { id: 'style',   label: 'Style',  show: !!analysis.styleMatchup },
-                    { id: 'upset',   label: 'Upset',  show: !!analysis.upsetAnalysis },
-                    { id: 'radar',   label: 'Radar' },
-                    { id: 'tape',    label: 'Tape',   show: (analysis.commonOpponents?.length ?? 0) > 0 },
-                    { id: 'odds',    label: 'Odds',   show: !!analysis.odds },
-                  ].filter(n => n.show !== false).map(nav => (
-                    <button key={nav.id}
-                      onClick={(e) => { e.stopPropagation(); scrollTo(nav.id); }}
-                      className="px-3 sm:px-4 py-2 text-[10px] font-mono font-bold uppercase tracking-widest whitespace-nowrap hover:text-white transition-colors"
-                      style={{ color: '#3a3a5c' }}>
-                      {nav.label}
-                    </button>
-                  ))}
-                </nav>
-
-                <div className="p-4 sm:p-6 space-y-6 sm:space-y-8">
-
-                  {/* Verdict */}
-                  <section id={sid('verdict')}>
-                    <SectionHeader icon={<Target className="w-4 h-4 sm:w-5 sm:h-5" style={{ color: GOLD }} />} title="The Verdict" />
-                    <div className="rounded-xl p-4 sm:p-5 space-y-3 border" style={{
-                      background: GOLD_DIM,
-                      borderColor: GOLD_BORDER,
-                      boxShadow: `0 0 32px rgba(245,158,11,0.05)`,
-                    }}>
-                      <div className="flex items-center gap-2 pb-3 border-b border-white/5">
-                        {[{ f: analysis.fighterA, isP: isPickA }, { f: analysis.fighterB, isP: !isPickA }].map(({ f, isP }, i) => (
-                          <div key={i} className="flex items-center gap-2 min-w-0">
-                            {i === 1 && <span className="text-[10px] font-mono text-white/20 shrink-0">vs</span>}
-                            <FighterAvatar name={f.name} espnId={f.espnId} size="sm" />
-                            <span className={cn('font-bold text-xs uppercase truncate', isP ? '' : 'opacity-30')}
-                              style={isP ? { color: GOLD } : {}}>
-                              {f.name}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-                        <span className="font-mono text-white/30 text-xs uppercase">Pick:</span>
-                        <span className="text-lg sm:text-xl font-black uppercase" style={{ color: GOLD }}>{analysis.lean.fighter}</span>
-                        <ConfidenceBadge confidence={analysis.lean.confidence} />
-                      </div>
-                      <div className="text-white/80 leading-relaxed space-y-2 sm:space-y-3 text-xs sm:text-sm max-w-4xl">
-                        {analysis.lean.reasoning.split('\n').filter(Boolean).map((para, i) => <p key={i}>{para}</p>)}
-                      </div>
-                    </div>
-                  </section>
-
-                  {/* Style Matchup */}
-                  {analysis.styleMatchup && (
-                    <section id={sid('style')}>
-                      <SectionHeader icon={<Swords className="w-4 h-4 sm:w-5 sm:h-5" style={{ color: VIOLET }} />} title="Style Clash" />
-                      <div className="p-4 sm:p-5 rounded-xl border" style={{ background: VIOLET_DIM, borderColor: VIOLET_BORDER }}>
-                        <div className="flex items-start sm:items-center gap-3 mb-3 pb-3 border-b border-white/10 flex-wrap sm:flex-nowrap">
-                          <StyleTag style={analysis.fighterA.style ?? 'Fighter'} name={analysis.fighterA.name} />
-                          <span className="font-bold text-xs font-mono shrink-0" style={{ color: VIOLET }}>VS</span>
-                          <StyleTag style={analysis.fighterB.style ?? 'Fighter'} name={analysis.fighterB.name} />
-                        </div>
-                        <div className="text-white/80 leading-relaxed space-y-2 sm:space-y-3 text-xs sm:text-sm">
-                          {analysis.styleMatchup.split('\n').filter(Boolean).map((para, i) => <p key={i}>{para}</p>)}
-                        </div>
-                      </div>
-                    </section>
-                  )}
-
-                  {/* Upset Path */}
-                  {analysis.upsetAnalysis && (
-                    <section id={sid('upset')}>
-                      <SectionHeader icon={<TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-violet-400" />} title="Upset Path" />
-                      <div className="p-4 sm:p-5 rounded-xl border" style={{ background: VIOLET_DIM, borderColor: VIOLET_BORDER }}>
-                        <div className="text-white/80 leading-relaxed space-y-2 sm:space-y-3 text-xs sm:text-sm">
-                          {analysis.upsetAnalysis.split('\n').filter(Boolean).map((para, i) => <p key={i}>{para}</p>)}
-                        </div>
-                      </div>
-                    </section>
-                  )}
-
-                  {/* Edges + Risks */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
-                    <section className="space-y-2 sm:space-y-3">
-                      <h4 className="font-mono font-bold text-[10px] sm:text-xs uppercase flex items-center gap-2" style={{ color: GOLD }}>
-                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: GOLD }} />
-                        Key Edges
-                      </h4>
-                      <ul className="space-y-1.5 sm:space-y-2">
-                        {analysis.lean.keyEdges?.map((edge, i) => (
-                          <li key={i} className="border px-3 py-2 sm:p-3 rounded-lg flex items-start gap-2" style={{
-                            background: GOLD_DIM, borderColor: GOLD_BORDER,
-                          }}>
-                            <span className="font-bold mt-0.5 shrink-0" style={{ color: GOLD }}>›</span>
-                            <span className="text-white/70 text-xs sm:text-sm">{edge}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </section>
-                    <section className="space-y-2 sm:space-y-3">
-                      <h4 className="font-mono font-bold text-[10px] sm:text-xs uppercase text-amber-500 flex items-center gap-2">
-                        <ShieldAlert className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                        Risk Factors
-                      </h4>
-                      <ul className="space-y-1.5 sm:space-y-2">
-                        {analysis.lean.riskFactors?.map((risk, i) => (
-                          <li key={i} className="border px-3 py-2 sm:p-3 rounded-lg flex items-start gap-2" style={{
-                            background: 'rgba(245,158,11,0.04)', borderColor: 'rgba(245,158,11,0.15)',
-                          }}>
-                            <span className="text-amber-500 font-bold mt-0.5 shrink-0">›</span>
-                            <span className="text-white/70 text-xs sm:text-sm">{risk}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </section>
-                  </div>
-
-                  {/* Radar */}
-                  <section id={sid('radar')}>
-                    <SectionHeader icon={<span className="text-base">📡</span>} title="Fighter Comparison" />
-                    <FighterRadar profileA={analysis.fighterA} profileB={analysis.fighterB} isPickA={isPickA} />
-                  </section>
-
-                  {/* Fighter Profiles */}
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-                    <FighterProfile profile={analysis.fighterA} commonOpponents={analysis.commonOpponents} isPickedFighter={isPickA} />
-                    <FighterProfile profile={analysis.fighterB} commonOpponents={analysis.commonOpponents} isPickedFighter={!isPickA} />
-                  </div>
-
-                  {/* Common Opponents */}
-                  {analysis.commonOpponents?.length > 0 && (
-                    <section id={sid('tape')} className="space-y-3 sm:space-y-4">
-                      <SectionHeader icon={<Users className="w-4 h-4 sm:w-5 sm:h-5" style={{ color: VIOLET }} />} title="Common Opponent Tape" />
-                      <div className="space-y-2 sm:space-y-3">
-                        {analysis.commonOpponents.map((co, i) => (
-                          <div key={i} className="border rounded-xl overflow-hidden" style={{ borderColor: 'rgba(255,255,255,0.07)' }}>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); setExpandedOpponent(prev => prev === co.opponent ? null : co.opponent); }}
-                              className="w-full px-3 sm:px-4 py-2.5 border-b flex items-center justify-between hover:bg-white/5 transition-colors"
-                              style={{ background: 'rgba(255,255,255,0.03)', borderColor: 'rgba(255,255,255,0.07)' }}>
-                              <span className="font-bold font-mono text-[10px] sm:text-xs uppercase tracking-wide">{co.opponent}</span>
-                              <ChevronDown className={cn('w-3.5 h-3.5 transition-transform duration-200 text-white/20', expandedOpponent === co.opponent && 'rotate-180')} />
-                            </button>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-white/[0.06]">
-                              <ResultCell name={analysis.fighterA.name} result={co.resultA} method={co.methodA} />
-                              <ResultCell name={analysis.fighterB.name} result={co.resultB} method={co.methodB} />
-                            </div>
-                            {expandedOpponent === co.opponent && co.notes && (
-                              <div className="px-3 sm:px-4 py-3 sm:py-4 border-t text-[11px] sm:text-xs text-white/70 leading-relaxed"
-                                style={{ background: VIOLET_DIM, borderColor: VIOLET_BORDER }}>
-                                <span className="font-bold font-mono text-[9px] uppercase tracking-widest text-violet-400/70 block mb-1.5">Tape Analysis</span>
-                                {co.notes}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </section>
-                  )}
-
-                  {/* Odds */}
-                  {analysis.odds && (
-                    <div id={sid('odds')} className="pt-4 sm:pt-6 border-t border-white/[0.06]">
-                      <div className="flex flex-wrap items-center gap-2 sm:gap-4 px-3 sm:px-4 py-2.5 rounded-xl font-mono text-[10px] sm:text-xs border"
-                        style={{ background: 'rgba(255,255,255,0.02)', borderColor: 'rgba(255,255,255,0.06)' }}>
-                        <span className="text-white/30 uppercase font-bold w-full sm:w-auto">Book Odds ({analysis.odds.book || 'Market'})</span>
-                        <span>{analysis.fighterA.name}: <span className="text-white font-bold">{displayOdds(analysis.odds.fighterA, oddsFormat)}</span></span>
-                        <span className="text-white/20">·</span>
-                        <span>{analysis.fighterB.name}: <span className="text-white font-bold">{displayOdds(analysis.odds.fighterB, oddsFormat)}</span></span>
-                        <button onClick={(e) => { e.stopPropagation(); cycleOdds(); }}
-                          className="ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-mono text-[9px] uppercase tracking-widest font-bold hover:bg-white/10 transition-colors"
-                          style={{ borderColor: 'rgba(255,255,255,0.12)', color: VIOLET }}>
-                          <RefreshCw className="w-2.5 h-2.5" />
-                          {oddsFormat === 'american' ? 'American' : oddsFormat === 'decimal' ? 'Decimal' : 'Implied %'}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                <span style={{ fontFamily: 'var(--app-font-mono)', fontSize: '8px', letterSpacing: '0.18em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.3)', fontWeight: 700 }}>Pick</span>
+                <span style={{ fontFamily: 'var(--app-font-display)', fontWeight: 900, fontSize: 'clamp(14px, 3vw, 17px)', letterSpacing: '0.04em', textTransform: 'uppercase', color: GOLD }}>{pick}</span>
+                <ConfidenceBadge confidence={analysis!.lean.confidence} />
               </>
+            ) : !analysis ? (
+              <span style={{ fontFamily: 'var(--app-font-mono)', fontSize: '9px', color: 'rgba(255,255,255,0.2)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Click to analyze</span>
             ) : null}
           </div>
-        )}
-      </div>
-    </TooltipProvider>
-  );
-}
+          <div style={{ color: 'rgba(255,255,255,0.18)' }}>
+            {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </div>
+        </div>
+      </button>
 
-/* ── Radar Chart ───────────────────────────────────────────────────── */
-const RADAR_DIMS = ['Striking','Grappling','Cardio','Chin','Power','Defense'] as const;
-type RadarDim = typeof RADAR_DIMS[number];
-const DIM_KEY_MAP: Record<RadarDim, keyof RadarMetrics> = {
-  Striking:'striking', Grappling:'grappling', Cardio:'cardio', Chin:'chin', Power:'power', Defense:'defense',
-};
-function FighterRadar({ profileA, profileB, isPickA }: { profileA: ExtendedFighterStats; profileB: ExtendedFighterStats; isPickA: boolean }) {
-  const metricsA = deriveRadar(profileA);
-  const metricsB = deriveRadar(profileB);
-  const data = RADAR_DIMS.map(dim => ({ metric: dim, [profileA.name]: metricsA[DIM_KEY_MAP[dim]], [profileB.name]: metricsB[DIM_KEY_MAP[dim]], fullMark: 10 }));
-  const colorA = isPickA ? GOLD : 'rgba(124,58,237,0.85)';
-  const colorB = !isPickA ? GOLD : 'rgba(124,58,237,0.85)';
-  return (
-    <div className="rounded-xl border border-white/[0.07] p-4 sm:p-5" style={{ background: 'rgba(255,255,255,0.02)' }}>
-      <ResponsiveContainer width="100%" height={280}>
-        <RadarChart data={data} margin={{ top: 10, right: 30, bottom: 10, left: 30 }}>
-          <PolarGrid stroke="rgba(255,255,255,0.06)" />
-          <PolarAngleAxis dataKey="metric" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10, fontFamily: 'monospace', fontWeight: 700 }} />
-          <Radar name={profileA.name} dataKey={profileA.name} stroke={colorA} fill={colorA} fillOpacity={0.15} strokeWidth={2} />
-          <Radar name={profileB.name} dataKey={profileB.name} stroke={colorB} fill={colorB} fillOpacity={0.15} strokeWidth={2} />
-          <Legend wrapperStyle={{ fontSize: '10px', fontFamily: 'monospace', paddingTop: '8px' }}
-            formatter={(value) => <span style={{ color: value === profileA.name ? colorA : colorB }}>{value}</span>} />
-        </RadarChart>
-      </ResponsiveContainer>
+      {/* ── Expanded analysis ── */}
+      {isExpanded && (
+        <div className="border-t" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+          {isLoading ? (
+            <div className="p-5 space-y-4">
+              <div className="flex items-center gap-2" style={{ color: RED }}>
+                <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                <span style={{ fontFamily: 'var(--app-font-mono)', fontSize: '11px', color: RED }}>Deep scouting in progress… first analysis takes up to 30s.</span>
+              </div>
+              <Skeleton className="h-5 w-1/3 bg-white/5" />
+              <Skeleton className="h-28 w-full bg-white/5" />
+            </div>
+          ) : isError ? (
+            <div className="p-8 text-center">
+              <AlertCircle className="w-6 h-6 mx-auto mb-3" style={{ color: LOSS_COLOR }} />
+              <p style={{ fontFamily: 'var(--app-font-mono)', fontSize: '11px', color: 'rgba(255,255,255,0.3)' }}>Analysis unavailable. Try again in a moment.</p>
+            </div>
+          ) : analysis ? (
+            <>
+              {/* Sticky anchor nav */}
+              <nav className="sticky top-0 z-30 flex items-center gap-0 overflow-x-auto border-b scrollbar-none"
+                style={{ background: '#0D0D0F', borderColor: 'rgba(255,255,255,0.06)' }}>
+                {[
+                  { id: 'verdict', label: 'Verdict' },
+                  { id: 'edges',   label: 'Edges' },
+                  { id: 'style',   label: 'Style',  show: !!analysis.styleMatchup },
+                  { id: 'upset',   label: 'Upset',  show: !!analysis.upsetAnalysis },
+                  { id: 'radar',   label: 'Stats' },
+                  { id: 'profiles',label: 'Profiles' },
+                  { id: 'tape',    label: 'Tape',   show: (analysis.commonOpponents?.length ?? 0) > 0 },
+                  { id: 'odds',    label: 'Odds',   show: !!analysis.odds },
+                ].filter(n => n.show !== false).map(nav => (
+                  <button key={nav.id} onClick={(e) => { e.stopPropagation(); scrollTo(nav.id); }}
+                    className="px-4 py-2.5 whitespace-nowrap hover:text-white transition-colors"
+                    style={{ fontFamily: 'var(--app-font-display)', fontWeight: 700, fontSize: '11px', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.3)' }}>
+                    {nav.label}
+                  </button>
+                ))}
+              </nav>
+
+              <div className="p-4 sm:p-6 space-y-8">
+
+                {/* Verdict */}
+                <section id={sid('verdict')}>
+                  <SectionLabel color={GOLD}>The Verdict</SectionLabel>
+                  <div className="border p-5 space-y-4" style={{ background: GOLD_DIM, borderColor: GOLD_BORDER }}>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span style={{ fontFamily: 'var(--app-font-mono)', fontSize: '9px', letterSpacing: '0.18em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.4)', fontWeight: 700 }}>Pick:</span>
+                      <span style={{ fontFamily: 'var(--app-font-display)', fontWeight: 900, fontSize: '24px', letterSpacing: '0.04em', textTransform: 'uppercase', color: GOLD, lineHeight: 1 }}>
+                        {analysis.lean.fighter}
+                      </span>
+                      <ConfidenceBadge confidence={analysis.lean.confidence} />
+                    </div>
+                    <div className="space-y-3" style={{ fontSize: '13px', lineHeight: 1.65, color: 'rgba(250,250,250,0.82)' }}>
+                      {analysis.lean.reasoning.split('\n').filter(Boolean).map((para, i) => <p key={i}>{para}</p>)}
+                    </div>
+                  </div>
+                </section>
+
+                {/* Key Edges + Risk Factors */}
+                <section id={sid('edges')} className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <div className="space-y-3">
+                    <SectionLabel color={WIN_COLOR}>Key Edges</SectionLabel>
+                    <ul className="space-y-2">
+                      {analysis.lean.keyEdges?.map((edge, i) => (
+                        <li key={i} className="flex items-start gap-3 border p-3" style={{ background: 'rgba(34,197,94,0.04)', borderColor: 'rgba(34,197,94,0.12)' }}>
+                          <span style={{ color: WIN_COLOR, fontWeight: 900, marginTop: '1px', flexShrink: 0, fontFamily: 'var(--app-font-display)', fontSize: '14px' }}>›</span>
+                          <span style={{ fontSize: '12px', lineHeight: 1.55, color: 'rgba(250,250,250,0.72)' }}>{edge}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div className="space-y-3">
+                    <SectionLabel color={RED}><ShieldAlert className="w-3.5 h-3.5 inline-block mr-1 -mt-0.5" />Risk Factors</SectionLabel>
+                    <ul className="space-y-2">
+                      {analysis.lean.riskFactors?.map((risk, i) => (
+                        <li key={i} className="flex items-start gap-3 border p-3" style={{ background: RED_DIM, borderColor: RED_BORDER }}>
+                          <span style={{ color: RED, fontWeight: 900, marginTop: '1px', flexShrink: 0, fontFamily: 'var(--app-font-display)', fontSize: '14px' }}>›</span>
+                          <span style={{ fontSize: '12px', lineHeight: 1.55, color: 'rgba(250,250,250,0.72)' }}>{risk}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </section>
+
+                {/* Style Matchup */}
+                {analysis.styleMatchup && (
+                  <section id={sid('style')}>
+                    <SectionLabel color="#818CF8"><Swords className="w-3.5 h-3.5 inline-block mr-1 -mt-0.5" />Style Clash</SectionLabel>
+                    <div className="border p-5 space-y-4" style={{ background: 'rgba(129,140,248,0.06)', borderColor: 'rgba(129,140,248,0.18)' }}>
+                      <div className="flex items-center gap-3 pb-3 border-b flex-wrap" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
+                        <StyleTag style={analysis.fighterA.style ?? 'Fighter'} name={analysis.fighterA.name} />
+                        <span style={{ color: 'rgba(129,140,248,0.7)', fontFamily: 'var(--app-font-display)', fontWeight: 800, fontSize: '12px' }}>VS</span>
+                        <StyleTag style={analysis.fighterB.style ?? 'Fighter'} name={analysis.fighterB.name} />
+                      </div>
+                      <div className="space-y-2.5" style={{ fontSize: '13px', lineHeight: 1.65, color: 'rgba(250,250,250,0.78)' }}>
+                        {analysis.styleMatchup.split('\n').filter(Boolean).map((para, i) => <p key={i}>{para}</p>)}
+                      </div>
+                    </div>
+                  </section>
+                )}
+
+                {/* Upset Path */}
+                {analysis.upsetAnalysis && (
+                  <section id={sid('upset')}>
+                    <SectionLabel color="#C084FC"><TrendingUp className="w-3.5 h-3.5 inline-block mr-1 -mt-0.5" />Upset Path</SectionLabel>
+                    <div className="border p-5 space-y-2.5" style={{ background: 'rgba(192,132,252,0.05)', borderColor: 'rgba(192,132,252,0.18)' }}>
+                      <div style={{ fontSize: '13px', lineHeight: 1.65, color: 'rgba(250,250,250,0.78)' }}>
+                        {analysis.upsetAnalysis.split('\n').filter(Boolean).map((para, i) => <p key={i}>{para}</p>)}
+                      </div>
+                    </div>
+                  </section>
+                )}
+
+                {/* Radar */}
+                <section id={sid('radar')}>
+                  <SectionLabel color="rgba(255,255,255,0.5)">Fighter Stats Radar</SectionLabel>
+                  <FighterRadar profileA={analysis.fighterA} profileB={analysis.fighterB} isPickA={isPickA} />
+                </section>
+
+                {/* Fighter Profiles */}
+                <section id={sid('profiles')}>
+                  <SectionLabel color="rgba(255,255,255,0.5)">Fighter Profiles</SectionLabel>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <FighterProfile profile={analysis.fighterA} isPickedFighter={isPickA} />
+                    <FighterProfile profile={analysis.fighterB} isPickedFighter={!isPickA} />
+                  </div>
+                </section>
+
+                {/* Common Opponents Tape */}
+                {analysis.commonOpponents?.length > 0 && (
+                  <section id={sid('tape')}>
+                    <SectionLabel color="#60A5FA"><Users className="w-3.5 h-3.5 inline-block mr-1 -mt-0.5" />Common Opponent Tape</SectionLabel>
+                    <div className="space-y-2">
+                      {analysis.commonOpponents.map((co, i) => (
+                        <div key={i} className="border overflow-hidden" style={{ borderColor: 'rgba(255,255,255,0.07)' }}>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setExpandedOpponent(prev => prev === co.opponent ? null : co.opponent); }}
+                            className="w-full px-4 py-2.5 flex items-center justify-between hover:bg-white/5 transition-colors border-b"
+                            style={{ background: 'rgba(255,255,255,0.03)', borderColor: 'rgba(255,255,255,0.06)' }}>
+                            <span style={{ fontFamily: 'var(--app-font-display)', fontWeight: 800, fontSize: '13px', letterSpacing: '0.04em', textTransform: 'uppercase' }}>{co.opponent}</span>
+                            <ChevronDown className={cn('w-3.5 h-3.5 transition-transform duration-200', 'text-white/20', expandedOpponent === co.opponent && 'rotate-180')} />
+                          </button>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+                            <ResultCell name={analysis.fighterA.name} result={co.resultA} method={co.methodA} />
+                            <ResultCell name={analysis.fighterB.name} result={co.resultB} method={co.methodB} />
+                          </div>
+                          {expandedOpponent === co.opponent && co.notes && (
+                            <div className="px-4 py-3 border-t" style={{ background: 'rgba(96,165,250,0.06)', borderColor: 'rgba(96,165,250,0.15)' }}>
+                              <span style={{ fontFamily: 'var(--app-font-mono)', fontSize: '8px', letterSpacing: '0.15em', textTransform: 'uppercase', color: '#60A5FA', fontWeight: 700, display: 'block', marginBottom: '6px' }}>Tape Analysis</span>
+                              <p style={{ fontSize: '12px', lineHeight: 1.6, color: 'rgba(250,250,250,0.72)' }}>{co.notes}</p>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {/* Odds */}
+                {analysis.odds && (
+                  <div id={sid('odds')} className="pt-4 border-t" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+                    <div className="flex flex-wrap items-center gap-3 px-4 py-3 border" style={{ background: 'rgba(255,255,255,0.02)', borderColor: 'rgba(255,255,255,0.07)' }}>
+                      <span style={{ fontFamily: 'var(--app-font-mono)', fontSize: '9px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.3)', fontWeight: 700, width: '100%', display: 'block', marginBottom: '-4px' }}>
+                        Book Odds ({analysis.odds.book || 'Market'})
+                      </span>
+                      <span style={{ fontFamily: 'var(--app-font-mono)', fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>
+                        {analysis.fighterA.name}: <strong style={{ color: '#FAFAFA' }}>{displayOdds(analysis.odds.fighterA, oddsFormat)}</strong>
+                      </span>
+                      <span style={{ color: 'rgba(255,255,255,0.15)' }}>·</span>
+                      <span style={{ fontFamily: 'var(--app-font-mono)', fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>
+                        {analysis.fighterB.name}: <strong style={{ color: '#FAFAFA' }}>{displayOdds(analysis.odds.fighterB, oddsFormat)}</strong>
+                      </span>
+                      <button onClick={(e) => { e.stopPropagation(); cycleOdds(); }}
+                        className="ml-auto flex items-center gap-1.5 px-3 py-1 border hover:bg-white/10 transition-colors"
+                        style={{ borderColor: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.4)', fontFamily: 'var(--app-font-mono)', fontSize: '8px', letterSpacing: '0.15em', textTransform: 'uppercase', fontWeight: 700 }}>
+                        <RefreshCw className="w-2.5 h-2.5" />
+                        {oddsFormat === 'american' ? 'American' : oddsFormat === 'decimal' ? 'Decimal' : 'Implied %'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }
 
-/* ── Sub-components ────────────────────────────────────────────────── */
-function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
+/* ── Section label ──────────────────────────────────────────────────── */
+function SectionLabel({ children, color }: { children: React.ReactNode; color: string }) {
   return (
-    <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
-      {icon}
-      <h3 className="text-base sm:text-lg font-bold uppercase tracking-tight">{title}</h3>
+    <div className="flex items-center gap-3 mb-3">
+      <div className="w-0.5 h-4 rounded-full shrink-0" style={{ background: color }} />
+      <h3 style={{ fontFamily: 'var(--app-font-display)', fontWeight: 800, fontSize: '13px', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.7)' }}>
+        {children}
+      </h3>
     </div>
   );
 }
 
+/* ── Confidence badge ───────────────────────────────────────────────── */
 function ConfidenceBadge({ confidence }: { confidence: string }) {
   const isStrong = confidence === 'strong';
   return (
-    <Badge variant="outline" className="uppercase font-black font-mono tracking-widest text-[9px] sm:text-[10px]"
-      style={isStrong
-        ? { background: 'rgba(245,158,11,0.15)', color: GOLD, borderColor: GOLD_BORDER }
-        : { background: 'rgba(124,58,237,0.1)', color: '#a78bfa', borderColor: 'rgba(124,58,237,0.3)' }}>
+    <span className="border px-2 py-0.5" style={isStrong
+      ? { background: 'rgba(245,158,11,0.12)', borderColor: 'rgba(245,158,11,0.25)', color: GOLD, fontFamily: 'var(--app-font-mono)', fontSize: '8px', letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 700 }
+      : { background: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.4)', fontFamily: 'var(--app-font-mono)', fontSize: '8px', letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 700 }
+    }>
       {isStrong ? '🔒 LOCK' : confidence}
-    </Badge>
+    </span>
   );
 }
 
-const STYLE_COLORS: Record<string, string> = {
-  boxer:'text-blue-400 border-blue-400/30 bg-blue-500/10', boxing:'text-blue-400 border-blue-400/30 bg-blue-500/10',
-  wrestl:'text-yellow-400 border-yellow-400/30 bg-yellow-500/10',
-  jiu:'text-purple-400 border-purple-400/30 bg-purple-500/10', bjj:'text-purple-400 border-purple-400/30 bg-purple-500/10',
-  sambo:'text-red-400 border-red-400/30 bg-red-500/10',
-  muay:'text-orange-400 border-orange-400/30 bg-orange-500/10', kick:'text-orange-400 border-orange-400/30 bg-orange-500/10',
-  karate:'text-cyan-400 border-cyan-400/30 bg-cyan-500/10',
-  judo:'text-emerald-400 border-emerald-400/30 bg-emerald-500/10',
-};
-function getStyleColor(style: string) {
-  const lower = style.toLowerCase();
-  for (const [key, cls] of Object.entries(STYLE_COLORS)) if (lower.includes(key)) return cls;
-  return 'text-white/40 border-white/20 bg-white/5';
-}
+/* ── Style tag ──────────────────────────────────────────────────────── */
 function StyleTag({ style, name }: { style: string; name: string }) {
   return (
-    <div className="flex flex-col gap-0.5 sm:gap-1 min-w-0">
-      <span className="text-[9px] sm:text-[10px] font-mono text-white/30 uppercase truncate">{name}</span>
-      <span className={cn('text-[10px] sm:text-xs font-bold font-mono px-1.5 sm:px-2 py-0.5 sm:py-1 rounded border truncate', getStyleColor(style))}>{style}</span>
+    <div className="flex flex-col gap-0.5 min-w-0">
+      <span style={{ fontFamily: 'var(--app-font-mono)', fontSize: '9px', color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>{name}</span>
+      <span className="border px-2 py-0.5 truncate" style={{ background: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.7)', fontFamily: 'var(--app-font-mono)', fontSize: '10px', fontWeight: 700 }}>{style}</span>
     </div>
   );
 }
+
+/* ── Result cell ─────────────────────────────────────────────────────── */
 function ResultCell({ name, result, method }: { name: string; result: string; method: string }) {
   const isWin = result?.toUpperCase() === 'W';
   return (
-    <div className="px-3 sm:px-4 py-2 sm:py-3 flex items-center gap-2 sm:gap-3">
-      <span className={cn('w-5 h-5 sm:w-6 sm:h-6 rounded-md flex items-center justify-center text-[10px] sm:text-xs font-black font-mono shrink-0',
-        isWin ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400')}>
-        {result}
-      </span>
+    <div className="px-4 py-3 flex items-center gap-3" style={{ background: 'rgba(255,255,255,0.02)' }}>
+      <span className="w-6 h-6 flex items-center justify-center text-[11px] font-black shrink-0 border"
+        style={isWin
+          ? { background: 'rgba(34,197,94,0.12)', color: WIN_COLOR, borderColor: 'rgba(34,197,94,0.2)', fontFamily: 'var(--app-font-display)' }
+          : { background: 'rgba(239,68,68,0.12)', color: LOSS_COLOR, borderColor: 'rgba(239,68,68,0.2)', fontFamily: 'var(--app-font-display)' }
+        }>{result}</span>
       <div className="min-w-0">
-        <div className="text-[9px] sm:text-[10px] font-mono text-white/30 uppercase truncate">{name}</div>
-        <div className="text-[10px] sm:text-xs font-mono font-bold">{method}</div>
+        <div style={{ fontFamily: 'var(--app-font-mono)', fontSize: '9px', color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{name}</div>
+        <div style={{ fontFamily: 'var(--app-font-mono)', fontSize: '11px', fontWeight: 700, color: 'rgba(255,255,255,0.75)' }}>{method}</div>
       </div>
     </div>
   );
 }
-function FighterProfile({ profile, commonOpponents, isPickedFighter }: { profile: ExtendedFighterStats; commonOpponents: CommonOpponent[]; isPickedFighter: boolean }) {
+
+/* ── Fighter profile ─────────────────────────────────────────────────── */
+function FighterProfile({ profile, isPickedFighter }: { profile: ExtendedFighterStats; isPickedFighter: boolean }) {
   return (
-    <div className="border rounded-xl p-4 sm:p-5 space-y-3 sm:space-y-4" style={{
+    <div className="border p-4 space-y-4" style={{
       background: isPickedFighter ? GOLD_DIM : 'rgba(255,255,255,0.02)',
       borderColor: isPickedFighter ? GOLD_BORDER : 'rgba(255,255,255,0.07)',
-      boxShadow: isPickedFighter ? `0 0 20px rgba(245,158,11,0.04)` : 'none',
     }}>
       <div className="flex justify-between items-start gap-2">
         <div className="min-w-0">
-          <h4 className="font-black text-sm sm:text-base uppercase tracking-tight truncate">{profile.name}</h4>
-          <p className={cn('text-[10px] sm:text-xs font-mono font-bold px-1.5 sm:px-2 py-0.5 mt-1 rounded border inline-block', getStyleColor(profile.style ?? ''))}>
-            {profile.style || 'Mixed Martial Arts'}
-          </p>
+          <h4 style={{ fontFamily: 'var(--app-font-display)', fontWeight: 900, fontSize: '17px', letterSpacing: '0.04em', textTransform: 'uppercase', lineHeight: 1.1 }}>{profile.name}</h4>
+          <span className="inline-block border mt-1.5 px-2 py-0.5" style={{ fontFamily: 'var(--app-font-mono)', fontSize: '9px', letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 700, color: 'rgba(255,255,255,0.5)', borderColor: 'rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.04)' }}>
+            {profile.style?.split('|')[0]?.trim() || 'MMA'}
+          </span>
         </div>
         <div className="flex gap-1 shrink-0 flex-wrap justify-end max-w-[120px]">
           {profile.recentForm?.map((res, i) => (
-            <span key={i} className={cn('flex items-center justify-center w-5 h-5 rounded-md text-[9px] sm:text-[10px] font-bold font-mono',
-              res === 'W' ? 'bg-green-500/20 text-green-500' : res === 'L' ? 'bg-red-500/20 text-red-500' : 'bg-gray-500/20 text-gray-400')}>
-              {res}
-            </span>
+            <span key={i} className="flex items-center justify-center w-5 h-5 text-[10px] font-black border"
+              style={res === 'W'
+                ? { background: 'rgba(34,197,94,0.1)', color: WIN_COLOR, borderColor: 'rgba(34,197,94,0.2)', fontFamily: 'var(--app-font-display)' }
+                : res === 'L'
+                ? { background: 'rgba(239,68,68,0.1)', color: LOSS_COLOR, borderColor: 'rgba(239,68,68,0.2)', fontFamily: 'var(--app-font-display)' }
+                : { background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.3)', borderColor: 'rgba(255,255,255,0.08)', fontFamily: 'var(--app-font-display)' }
+              }>{res}</span>
           ))}
         </div>
       </div>
-      <div className="space-y-2 sm:space-y-3">
-        {[{ label: 'Strengths', items: profile.strengths, type: 'strength' as const }, { label: 'Weaknesses', items: profile.weaknesses, type: 'weakness' as const }].map(({ label, items, type }) => (
+      <div className="space-y-3">
+        {[
+          { label: 'Strengths', items: profile.strengths, borderColor: 'rgba(34,197,94,0.2)', bg: 'rgba(34,197,94,0.07)', color: '#86EFAC' },
+          { label: 'Weaknesses', items: profile.weaknesses, borderColor: 'rgba(239,68,68,0.2)', bg: 'rgba(239,68,68,0.07)', color: '#FCA5A5' },
+        ].map(({ label, items, borderColor, bg, color }) => (
           <div key={label}>
-            <h5 className="text-[9px] sm:text-[10px] uppercase font-bold font-mono text-white/30 mb-1.5 sm:mb-2">{label}</h5>
-            <div className="flex flex-wrap gap-1.5 sm:gap-2">
+            <h5 style={{ fontFamily: 'var(--app-font-mono)', fontSize: '8px', letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 700, color: 'rgba(255,255,255,0.3)', marginBottom: '6px' }}>{label}</h5>
+            <div className="flex flex-wrap gap-1.5">
               {items?.map((s, i) => (
-                <span key={i} className={cn('text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md border',
-                  type === 'strength' ? 'bg-green-500/10 border-green-500/20 text-green-300' : 'bg-red-500/10 border-red-500/20 text-red-300'
-                )}>{s}</span>
+                <span key={i} className="border px-2 py-0.5" style={{ borderColor, background: bg, color, fontFamily: 'var(--app-font-mono)', fontSize: '9px', letterSpacing: '0.06em' }}>{s}</span>
               ))}
             </div>
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+/* ── Radar chart ─────────────────────────────────────────────────────── */
+const RADAR_DIMS = ['Striking','Grappling','Cardio','Chin','Power','Defense'] as const;
+type RadarDim = typeof RADAR_DIMS[number];
+const DIM_KEY_MAP: Record<RadarDim, keyof RadarMetrics> = {
+  Striking:'striking', Grappling:'grappling', Cardio:'cardio', Chin:'chin', Power:'power', Defense:'defense',
+};
+
+function FighterRadar({ profileA, profileB, isPickA }: { profileA: ExtendedFighterStats; profileB: ExtendedFighterStats; isPickA: boolean }) {
+  const metricsA = deriveRadar(profileA);
+  const metricsB = deriveRadar(profileB);
+  const data = RADAR_DIMS.map(dim => ({
+    metric: dim,
+    [profileA.name]: metricsA[DIM_KEY_MAP[dim]],
+    [profileB.name]: metricsB[DIM_KEY_MAP[dim]],
+    fullMark: 10,
+  }));
+  const colorA = isPickA ? GOLD : '#818CF8';
+  const colorB = !isPickA ? GOLD : '#818CF8';
+
+  return (
+    <div className="border p-4" style={{ background: 'rgba(255,255,255,0.02)', borderColor: 'rgba(255,255,255,0.07)' }}>
+      <ResponsiveContainer width="100%" height={260}>
+        <RadarChart data={data} margin={{ top: 10, right: 30, bottom: 10, left: 30 }}>
+          <PolarGrid stroke="rgba(255,255,255,0.06)" />
+          <PolarAngleAxis dataKey="metric" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10, fontFamily: 'JetBrains Mono, monospace', fontWeight: 700 }} />
+          <Radar name={profileA.name} dataKey={profileA.name} stroke={colorA} fill={colorA} fillOpacity={0.14} strokeWidth={2} />
+          <Radar name={profileB.name} dataKey={profileB.name} stroke={colorB} fill={colorB} fillOpacity={0.14} strokeWidth={2} />
+          <Legend wrapperStyle={{ fontSize: '9px', fontFamily: 'JetBrains Mono, monospace', paddingTop: '8px', letterSpacing: '0.08em' }}
+            formatter={(value) => <span style={{ color: value === profileA.name ? colorA : colorB, textTransform: 'uppercase' }}>{value}</span>} />
+        </RadarChart>
+      </ResponsiveContainer>
     </div>
   );
 }

@@ -80,7 +80,7 @@ export function readDiskCache(fightId: string): DeepAnalysis | null {
     const p = getCachePath(fightId);
     if (!fs.existsSync(p)) return null;
     const ageHours = (Date.now() - fs.statSync(p).mtimeMs) / 3_600_000;
-    if (ageHours > 168) return null; // 7-day TTL — picks are locked until well after the fight
+    if (ageHours > 48) return null; // 48h TTL — re-run with fresh fighter data every 2 days
     return JSON.parse(fs.readFileSync(p, "utf8")) as DeepAnalysis;
   } catch {
     return null;

@@ -1,2 +1,3 @@
 - [UFCStats scraper](ufcstats-scraper.md) — SHA-256 PoW challenge solved server-side; session cached 50 min; fighter search by last-name letter index with compound-name fallback.
 - [AI analyzer upgrade](ai-analyzer-upgrade.md) — pre-computed matchup metrics injected into prompt; 5-pt checklist forces reach/age/stance/strike-diff/grappling analysis; token limit 5000; Sherdog now includes finish rates + layoff days.
+- [Site redesign](site-redesign.md) — Combat Broadcast design system: red #E11D48 primary, Barlow Condensed display font, sharp edges, 48h analysis TTL + per-fight refresh endpoint.

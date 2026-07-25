@@ -8,8 +8,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { LogOut, LayoutGrid, Trophy, CalendarDays } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-const GOLD   = '#f59e0b';
-const VIOLET = '#7c3aed';
+const RED  = '#E11D48';
+const GOLD = '#F59E0B';
 
 type Tab = 'card' | 'record' | 'schedule';
 
@@ -22,7 +22,6 @@ export default function Analyzer() {
   const { data: events, isLoading: isLoadingEvents } = useListEvents();
   const { data: record } = useGetRecord({ query: { staleTime: 1000 * 60 * 2, refetchInterval: 1000 * 60 * 2 } });
 
-  // Default to first upcoming event (nearest date), regardless of odds
   useEffect(() => {
     if (!events?.length || selectedEventId) return;
     const sorted = [...events].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -38,13 +37,13 @@ export default function Analyzer() {
     },
   });
 
-  const basePath   = import.meta.env.BASE_URL.replace(/\/$/, '');
-  const initials   = (user?.firstName?.[0] ?? user?.emailAddresses?.[0]?.emailAddress?.[0] ?? '?').toUpperCase();
+  const basePath    = import.meta.env.BASE_URL.replace(/\/$/, '');
+  const initials    = (user?.firstName?.[0] ?? user?.emailAddresses?.[0]?.emailAddress?.[0] ?? '?').toUpperCase();
   const displayName = user?.firstName ?? user?.emailAddresses?.[0]?.emailAddress?.split('@')[0] ?? '';
 
-  const wins    = record?.wins   ?? 0;
-  const losses  = record?.losses ?? 0;
-  const pct     = record?.pct    ?? null;
+  const wins      = record?.wins   ?? 0;
+  const losses    = record?.losses ?? 0;
+  const pct       = record?.pct    ?? null;
   const hasRecord = wins > 0 || losses > 0;
 
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
@@ -54,22 +53,18 @@ export default function Analyzer() {
   ];
 
   return (
-    <div className="min-h-[100dvh] flex flex-col" style={{ background: '#07070e' }}>
+    <div className="min-h-[100dvh] flex flex-col" style={{ background: '#09090B' }}>
 
       {/* ── Header ── */}
-      <header className="sticky top-0 z-40 border-b px-4 sm:px-6"
-        style={{ background: 'rgba(7,7,14,0.92)', backdropFilter: 'blur(18px)', borderColor: 'rgba(255,255,255,0.07)' }}>
-        <div className="flex items-center justify-between h-14">
+      <header className="sticky top-0 z-40 border-b"
+        style={{ background: 'rgba(9,9,11,0.95)', backdropFilter: 'blur(20px)', borderColor: 'rgba(255,255,255,0.07)' }}>
+        <div className="flex items-center justify-between px-4 sm:px-6 h-14">
           {/* Brand */}
-          <div className="flex items-center gap-2.5 shrink-0">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center text-[11px] font-black tracking-tight"
-              style={{ background: 'rgba(124,58,237,0.14)', color: VIOLET, border: `1px solid rgba(124,58,237,0.28)` }}>
-              GP
-            </div>
-            <div className="hidden sm:flex flex-col leading-none">
-              <span className="text-[11px] font-black uppercase tracking-[0.2em] text-white">
-                Gavin's <span style={{ color: GOLD }}>Picks™</span>
-              </span>
+          <div className="flex items-center gap-3 shrink-0">
+            <div className="w-7 h-7 flex items-center justify-center font-black"
+              style={{ background: RED, color: '#fff', fontFamily: 'var(--app-font-display)', fontSize: '14px' }}>G</div>
+            <div className="hidden sm:block" style={{ fontFamily: 'var(--app-font-display)', fontWeight: 900, fontSize: '15px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#fff' }}>
+              Gavin's <span style={{ color: GOLD }}>Picks™</span>
             </div>
           </div>
 
@@ -77,35 +72,38 @@ export default function Analyzer() {
           <div className="flex items-center gap-3">
             {/* W-L pill */}
             {hasRecord && (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-mono font-bold border"
-                style={{ background: 'rgba(245,158,11,0.06)', borderColor: 'rgba(245,158,11,0.2)' }}>
-                <span style={{ color: GOLD }}>{wins}W–{losses}L</span>
+              <div className="flex items-center gap-0 border overflow-hidden" style={{ borderColor: 'rgba(255,255,255,0.1)' }}>
+                <div className="px-2.5 py-1 text-xs font-black" style={{ background: 'rgba(34,197,94,0.12)', color: '#22C55E', fontFamily: 'var(--app-font-display)', fontSize: '13px', letterSpacing: '0.04em' }}>
+                  {wins}W
+                </div>
+                <div className="px-2.5 py-1 text-xs font-black border-l border-r" style={{ background: 'rgba(239,68,68,0.1)', color: '#EF4444', fontFamily: 'var(--app-font-display)', fontSize: '13px', letterSpacing: '0.04em', borderColor: 'rgba(255,255,255,0.08)' }}>
+                  {losses}L
+                </div>
                 {pct !== null && (
-                  <>
-                    <span className="text-white/20">·</span>
-                    <span style={{ color: pct >= 60 ? '#4ade80' : pct >= 50 ? GOLD : '#f87171' }}>{pct}%</span>
-                  </>
+                  <div className="px-2.5 py-1 text-xs font-black" style={{ background: 'rgba(255,255,255,0.04)', color: pct >= 60 ? '#22C55E' : pct >= 50 ? GOLD : '#EF4444', fontFamily: 'var(--app-font-mono)', fontSize: '11px' }}>
+                    {pct}%
+                  </div>
                 )}
               </div>
             )}
 
-            {/* Live dot */}
+            {/* Live indicator */}
             <div className="hidden sm:flex items-center gap-1.5">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60" style={{ background: VIOLET }} />
-                <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: VIOLET }} />
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ background: RED }} />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5" style={{ background: RED }} />
               </span>
-              <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: `${VIOLET}99` }}>Live</span>
+              <span style={{ fontFamily: 'var(--app-font-mono)', fontSize: '9px', letterSpacing: '0.15em', color: `${RED}99`, textTransform: 'uppercase' }}>Live</span>
             </div>
 
             {/* User */}
             {user && (
               <div className="flex items-center gap-2 pl-3 border-l" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
-                <div className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-black"
-                  style={{ background: 'rgba(245,158,11,0.14)', color: GOLD }}>{initials}</div>
-                <span className="hidden md:block text-[10px] font-mono text-white/30 max-w-[100px] truncate">{displayName}</span>
+                <div className="w-6 h-6 flex items-center justify-center text-[10px] font-black"
+                  style={{ background: RED, color: '#fff', fontFamily: 'var(--app-font-display)' }}>{initials}</div>
+                <span className="hidden md:block text-[10px] max-w-[90px] truncate" style={{ fontFamily: 'var(--app-font-mono)', color: 'rgba(255,255,255,0.3)' }}>{displayName}</span>
                 <button onClick={() => signOut({ redirectUrl: basePath || '/' })}
-                  className="p-1.5 rounded-lg hover:bg-white/5 transition-colors" title="Sign out">
+                  className="p-1.5 hover:bg-white/5 transition-colors" title="Sign out">
                   <LogOut className="w-3.5 h-3.5 text-white/20 hover:text-white/50" />
                 </button>
               </div>
@@ -114,23 +112,26 @@ export default function Analyzer() {
         </div>
 
         {/* Tab bar */}
-        <div className="flex items-center gap-0 -mb-px">
+        <div className="flex items-center gap-0 px-4 sm:px-6 border-t -mt-px" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
           {tabs.map(t => (
             <button key={t.id} onClick={() => setTab(t.id)}
               className={cn(
-                'flex items-center gap-1.5 px-4 py-2.5 text-[11px] font-mono font-bold uppercase tracking-widest border-b-2 transition-colors whitespace-nowrap',
-                tab === t.id ? 'border-b-amber-500 text-white' : 'border-b-transparent text-white/30 hover:text-white/60'
-              )}>
-              {t.icon}
-              {t.label}
+                'flex items-center gap-1.5 px-4 py-2.5 border-b-2 transition-all whitespace-nowrap',
+                tab === t.id ? 'border-b-current text-white' : 'border-b-transparent text-white/30 hover:text-white/60'
+              )}
+              style={tab === t.id ? { borderColor: RED, color: '#FAFAFA' } : {}}>
+              <span style={{ color: 'inherit' }}>{t.icon}</span>
+              <span style={{ fontFamily: 'var(--app-font-display)', fontWeight: 700, fontSize: '12px', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'inherit' }}>
+                {t.label}
+              </span>
             </button>
           ))}
         </div>
       </header>
 
       {/* ── Content ── */}
-      <main className="flex-1 w-full max-w-2xl mx-auto px-4 sm:px-6 py-6">
-        {tab === 'card'     && (
+      <main className="flex-1 w-full max-w-3xl mx-auto px-4 sm:px-6 py-6">
+        {tab === 'card' && (
           <CardTab
             events={events}
             isLoadingEvents={isLoadingEvents}
@@ -151,10 +152,9 @@ export default function Analyzer() {
         )}
       </main>
 
-      {/* ── Footer ── */}
-      <footer className="border-t px-4 py-4 text-center" style={{ borderColor: 'rgba(255,255,255,0.04)' }}>
-        <p className="text-[10px] font-mono" style={{ color: 'rgba(255,255,255,0.15)' }}>
-          © {new Date().getFullYear()} Gavin's Picks™ · For entertainment purposes only · Gamble responsibly
+      <footer className="border-t px-4 py-4 text-center" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
+        <p style={{ fontFamily: 'var(--app-font-mono)', fontSize: '9px', color: 'rgba(255,255,255,0.15)' }}>
+          © {new Date().getFullYear()} Gavin's Picks™ · For entertainment purposes only · Please gamble responsibly
         </p>
       </footer>
     </div>
@@ -172,31 +172,36 @@ function CardTab({
 }) {
   return (
     <div className="space-y-5">
-      {/* Event selector chips */}
+
+      {/* Event selector */}
       {isLoadingEvents ? (
-        <Skeleton className="h-10 w-full rounded-full bg-white/[0.04]" />
+        <Skeleton className="h-9 w-full bg-white/[0.04]" />
       ) : events?.length ? (
-        <div>
+        <div className="space-y-3">
           <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
             {events.map((ev: any) => (
               <button key={ev.id} onClick={() => setSelectedEventId(ev.id)}
-                className="shrink-0 px-4 py-2 rounded-full text-[11px] font-mono font-bold border transition-all whitespace-nowrap"
+                className="shrink-0 px-4 py-1.5 border transition-all whitespace-nowrap text-xs font-black uppercase"
                 style={selectedEventId === ev.id
-                  ? { background: GOLD, color: '#000', borderColor: 'transparent' }
-                  : { background: 'rgba(255,255,255,0.03)', color: 'rgba(255,255,255,0.4)', borderColor: 'rgba(255,255,255,0.1)' }
+                  ? { background: RED, color: '#fff', borderColor: RED, fontFamily: 'var(--app-font-display)', fontSize: '12px', letterSpacing: '0.06em' }
+                  : { background: 'rgba(255,255,255,0.03)', color: 'rgba(255,255,255,0.4)', borderColor: 'rgba(255,255,255,0.08)', fontFamily: 'var(--app-font-display)', fontSize: '12px', letterSpacing: '0.06em' }
                 }>
                 {ev.name.replace(/^UFC\s+/i, 'UFC ').replace(/Fight Night:\s*/i, 'FN: ')}
-                {!ev.hasOdds && <span className="ml-1.5 opacity-60">· TBD</span>}
               </button>
             ))}
           </div>
           {selectedEvent && (
-            <div className="mt-3 flex flex-wrap items-center gap-3 px-1 text-[11px] font-mono text-white/25">
-              <span>{new Date(selectedEvent.date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</span>
-              {selectedEvent.location && (<><span className="text-white/15">·</span><span>{selectedEvent.location}</span></>)}
+            <div className="flex flex-wrap items-center gap-3 px-1">
+              <span style={{ fontFamily: 'var(--app-font-mono)', fontSize: '10px', color: 'rgba(255,255,255,0.3)' }}>
+                {new Date(selectedEvent.date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+              </span>
+              {selectedEvent.location && (
+                <><span style={{ color: 'rgba(255,255,255,0.1)' }}>·</span>
+                <span style={{ fontFamily: 'var(--app-font-mono)', fontSize: '10px', color: 'rgba(255,255,255,0.2)' }}>{selectedEvent.location}</span></>
+              )}
               {!selectedEvent.hasOdds && (
-                <span className="px-2 py-0.5 rounded-full border text-[10px] font-black uppercase tracking-widest"
-                  style={{ color: GOLD, borderColor: 'rgba(245,158,11,0.25)', background: 'rgba(245,158,11,0.06)' }}>
+                <span className="px-2 py-0.5 border text-[9px] font-black uppercase"
+                  style={{ color: GOLD, borderColor: 'rgba(245,158,11,0.2)', background: 'rgba(245,158,11,0.06)', fontFamily: 'var(--app-font-mono)', letterSpacing: '0.1em' }}>
                   Odds TBD — AI uses fighter knowledge
                 </span>
               )}
@@ -207,18 +212,17 @@ function CardTab({
 
       {/* Fights */}
       {isLoadingCard ? (
-        <div className="space-y-3">
-          {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-28 w-full rounded-2xl bg-white/[0.04]" />)}
+        <div className="space-y-2">
+          {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-32 w-full bg-white/[0.03]" />)}
         </div>
       ) : eventCard?.fights?.length ? (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {eventCard.fights.map((fight: any) => <FightRow key={fight.id} fight={fight} />)}
         </div>
       ) : (
-        <div className="rounded-2xl border p-14 text-center" style={{ borderColor: 'rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.01)' }}>
-          <p className="text-3xl mb-3">🥊</p>
-          <p className="font-black uppercase tracking-tight text-white mb-2">Card Not Available Yet</p>
-          <p className="text-xs font-mono text-white/30">Fighter lineup hasn't been posted for this event.</p>
+        <div className="border p-14 text-center" style={{ borderColor: 'rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.01)' }}>
+          <p style={{ fontFamily: 'var(--app-font-display)', fontSize: '28px', fontWeight: 900, color: 'rgba(255,255,255,0.08)', textTransform: 'uppercase', marginBottom: '8px' }}>No Card Yet</p>
+          <p style={{ fontFamily: 'var(--app-font-mono)', fontSize: '11px', color: 'rgba(255,255,255,0.25)' }}>Fighter lineup hasn't been posted for this event.</p>
         </div>
       )}
     </div>

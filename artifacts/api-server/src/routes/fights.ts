@@ -1,8 +1,15 @@
 import { Router } from "express";
+import fs from "node:fs";
+import path from "node:path";
 import { fetchAllOddsFights, decimalToAmerican } from "../lib/odds.js";
 import { generateDeepAnalysis, readDiskCache } from "../lib/ai-analyzer.js";
 import type { DeepAnalysis } from "../lib/ai-analyzer.js";
 import { logger } from "../lib/logger.js";
+
+const ANALYSIS_CACHE_DIR = path.resolve(
+  path.dirname(new URL(import.meta.url).pathname),
+  "../../.cache/analysis"
+);
 
 const router = Router();
 
@@ -130,6 +137,22 @@ router.get("/fights/:fightId/analysis", async (req, res) => {
   } catch (err) {
     logger.error({ err, fightId }, "AI analysis failed");
     return res.status(500).json({ error: "Analysis generation failed. Check your OPENAI_API_KEY." });
+  }
+});
+
+/** DELETE /fights/:fightId/analysis — clear analysis cache so next GET re-runs with fresh data */
+router.delete("/fights/:fightId/analysis", (req, res) => {
+  const fightId = decodeURIComponent(req.params.fightId);
+  try {
+    const p = path.join(ANALYSIS_CACHE_DIR, `${fightId}.json`);
+    if (fs.existsSync(p)) {
+      fs.unlinkSync(p);
+      logger.info({ fightId }, "Analysis cache cleared via refresh request");
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    logger.warn({ err, fightId }, "Failed to clear analysis cache");
+    res.status(500).json({ error: "Failed to clear cache" });
   }
 });
 
