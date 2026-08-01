@@ -216,8 +216,10 @@ function CardTab({
           {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-32 w-full bg-white/[0.03]" />)}
         </div>
       ) : eventCard?.fights?.length ? (
-        <div className="space-y-2">
-          {eventCard.fights.map((fight: any) => <FightRow key={fight.id} fight={fight} />)}
+        <div className="space-y-1.5">
+          {eventCard.fights.map((fight: any) => (
+            <FightRow key={fight.id} fight={fight} eventDate={selectedEvent?.date} />
+          ))}
         </div>
       ) : (
         <div className="border p-14 text-center" style={{ borderColor: 'rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.01)' }}>

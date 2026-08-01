@@ -1,0 +1,14 @@
+Looking through your screenshots, I can see what you've got: a dark theme, tab nav (Card/Record/Schedule), fighter photo cards with odds, a "Pick" banner, and long text blocks under sub-tabs (Verdict/Edges/Style/Upset/Stats/Profiles) plus a radar chart. It's functional but has a few real problems worth fixing before you just "reskin" it:
+What's actually holding it back right now:
+It's wall-of-text heavy. The Verdict, Key Edges, and Style Clash sections are dense paragraphs — on mobile that's a lot of scrolling before someone sees the actual pick reasoning.
+Visual hierarchy is flat. Everything's roughly the same size/weight (headers, body text, cards) so nothing pulls your eye to the most important thing — the pick and the edge.
+The radar chart is the best asset on the page but it's buried at the bottom. That kind of visual should probably lead a section, not close it.
+Color usage is inconsistent — orange for picks, green for "correct," red as the base accent, blue in the chart. It works but feels a little uncoordinated rather than an intentional palette.
+The odds/pick module (−370 / +299 / Pick banner) is good — clear, scannable, keep that pattern and lean into it more elsewhere.
+Ideas that would upgrade this:
+Lead with a compact "TL;DR" strip — pick, confidence tag (Lean/Lock), one-line reasoning — before any long paragraphs. Right now Verdict is a full essay; most users want the headline first, details on tap/expand.
+Turn Key Edges into a scannable icon+stat list instead of paragraph cards — you're already close with the bullet cards, just tighten each to one line with a bolded stat (e.g. "3-0 first-round finishes" instead of a full sentence).
+Move the radar chart up, right under the fighter photos — it visually sells the matchup instantly, better than reading five stat categories in prose.
+Collapse the sub-tabs (Verdict/Edges/Style/Upset/Stats/Profiles) into an accordion or swipeable card stack rather than a thin tab bar that gets cut off (I can see "PROF..." truncating in your screenshot — that's a real bug, not just a taste thing).
+Give win/loss streaks a visual treatment — you already have the green W / red L chips (image 6), that's a great pattern, use it more (e.g. next to fighter names on the main card, not just buried in Fighter Profiles).
+A cleaner visual direction, given a betting/stats site, usually looks like: dark base (you have this), one confident accent color (pick orange or a signal green) instead of 3-4 competing colors, bigger typographic contrast between headline stats and body copy, and card-based modules with generous padding instead of dense stacked sections.
