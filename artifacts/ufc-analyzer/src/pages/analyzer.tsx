@@ -217,8 +217,8 @@ function CardTab({
         </div>
       ) : eventCard?.fights?.length ? (
         <div className="space-y-1.5">
-          {eventCard.fights.map((fight: any) => (
-            <FightRow key={fight.id} fight={fight} eventDate={selectedEvent?.date} />
+          {eventCard.fights.map((fight: any, index: number) => (
+            <FightRow key={fight.id} fight={fight} eventDate={selectedEvent?.date} fightIndex={index} />
           ))}
         </div>
       ) : (

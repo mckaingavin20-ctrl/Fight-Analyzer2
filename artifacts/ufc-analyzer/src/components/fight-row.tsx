@@ -101,77 +101,110 @@ function deriveRadar(profile: ExtendedFighterStats): RadarMetrics {
 /* ── API base ───────────────────────────────────────────────────────── */
 const BASE = (import.meta.env.BASE_URL ?? '').replace(/\/$/, '');
 
-/* ── Fight status badge (LIVE / countdown) ──────────────────────────── */
-function FightStatusBadge({ eventDate, isMain }: { eventDate?: string; isMain: boolean }) {
-  const [now, setNow] = useState(() => Date.now());
+/* ── Name normalization (handles apostrophes, accents, case) ────────── */
+function normName(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')   // strip diacritics
+    .replace(/['\u2018\u2019\u02bc\u0027]/g, '')        // strip apostrophes
+    .replace(/\s+/g, ' ').trim();
+}
+function sameFighter(a: string, b: string): boolean {
+  const na = normName(a), nb = normName(b);
+  return na === nb || na.includes(nb) || nb.includes(na);
+}
 
+/* ── Brief style helper (first 2 words only) ────────────────────────── */
+function briefStyle(style: string): string {
+  return (style.split(/[|·,]/)[0]?.trim() ?? '').split(/\s+/).slice(0, 2).join(' ');
+}
+
+/* ── Fight time estimator ───────────────────────────────────────────── */
+// Prelims start at eventDate; each fight ≈ 20 min apart; main event ≈ 5h in.
+function estimateFightMs(eventDate: string, isMain: boolean, fightIndex: number): number {
+  const base = new Date(eventDate).getTime();
+  if (isMain) return base + 5 * 3600 * 1000;
+  return base + fightIndex * 20 * 60 * 1000;
+}
+
+/* ── Center status widget (LIVE pulse | MM:SS countdown | VS) ───────── */
+function FightCenterStatus({
+  eventDate, isMain, fightIndex,
+}: {
+  eventDate?: string; isMain: boolean; fightIndex: number;
+}) {
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
 
-  if (!eventDate) return null;
-
-  // Estimate fight time: main event ≈ 5h after prelims start, other fights ≈ event time
-  const eventMs = new Date(eventDate).getTime();
-  const fightMs = isMain ? eventMs + 5 * 3600 * 1000 : eventMs;
-  const diff    = fightMs - now; // negative = in the past
-
-  // LIVE: fight time passed but within 4-hour window
-  if (diff < 0 && Math.abs(diff) < 4 * 3600 * 1000) {
+  if (!eventDate) {
     return (
-      <div className="flex items-center gap-1.5">
-        <span className="relative flex h-1.5 w-1.5">
+      <span style={{ fontFamily: 'var(--app-font-display)', fontWeight: 900, fontSize: '10px', letterSpacing: '0.12em', color: 'rgba(255,255,255,0.1)', textTransform: 'uppercase' }}>VS</span>
+    );
+  }
+
+  const fightMs = estimateFightMs(eventDate, isMain, fightIndex);
+  const diff    = fightMs - now; // negative = fight time passed
+
+  // ── LIVE: fight time passed, within 3-hour bout window ──
+  if (diff <= 0 && Math.abs(diff) < 3 * 3600 * 1000) {
+    return (
+      <div className="flex flex-col items-center gap-1">
+        <span className="relative flex h-2.5 w-2.5">
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ background: RED }} />
-          <span className="relative inline-flex rounded-full h-1.5 w-1.5" style={{ background: RED }} />
+          <span className="relative inline-flex rounded-full h-2.5 w-2.5" style={{ background: RED }} />
         </span>
         <span style={{
-          fontFamily: 'var(--app-font-mono)', fontSize: '9px',
-          letterSpacing: '0.18em', textTransform: 'uppercase',
+          fontFamily: 'var(--app-font-mono)', fontSize: '8px',
+          letterSpacing: '0.2em', textTransform: 'uppercase',
           color: RED, fontWeight: 700,
         }}>LIVE</span>
       </div>
     );
   }
 
-  // Countdown: within 6 hours
+  // ── Countdown: within 6 hours of this specific fight ──
   if (diff > 0 && diff < 6 * 3600 * 1000) {
-    const h  = Math.floor(diff / 3_600_000);
-    const m  = Math.floor((diff % 3_600_000) / 60_000);
-    const s  = Math.floor((diff % 60_000) / 1_000);
-    const display = h > 0
-      ? `${h}h ${String(m).padStart(2, '0')}m`
-      : `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    const h = Math.floor(diff / 3_600_000);
+    const m = Math.floor((diff % 3_600_000) / 60_000);
+    const s = Math.floor((diff % 60_000) / 1_000);
+    const top    = h > 0 ? `${h}h ${String(m).padStart(2, '0')}m` : `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
     return (
-      <div className="flex items-center gap-1" style={{
-        fontFamily: 'var(--app-font-mono)', fontSize: '9px',
-        letterSpacing: '0.1em', color: GOLD, fontWeight: 700,
-      }}>
-        <Zap className="w-2.5 h-2.5" />
-        <span>{display}</span>
+      <div className="flex flex-col items-center gap-0.5">
+        <Zap className="w-3 h-3" style={{ color: GOLD }} />
+        <span style={{
+          fontFamily: 'var(--app-font-mono)', fontSize: '9px',
+          letterSpacing: '0.05em', color: GOLD, fontWeight: 700,
+          whiteSpace: 'nowrap',
+        }}>{top}</span>
       </div>
     );
   }
 
-  // Today badge (more than 6h away but still today)
+  // Today but > 6h away
   const fightDay = new Date(fightMs);
   const today    = new Date();
   if (fightDay.toDateString() === today.toDateString()) {
     return (
-      <span style={{
-        fontFamily: 'var(--app-font-mono)', fontSize: '8px',
-        letterSpacing: '0.18em', textTransform: 'uppercase',
-        color: 'rgba(255,255,255,0.25)', fontWeight: 700,
-        border: '1px solid rgba(255,255,255,0.08)', padding: '1px 5px',
-      }}>TODAY</span>
+      <div className="flex flex-col items-center gap-0.5">
+        <span style={{ fontFamily: 'var(--app-font-display)', fontWeight: 900, fontSize: '10px', letterSpacing: '0.12em', color: 'rgba(255,255,255,0.1)', textTransform: 'uppercase' }}>VS</span>
+        <span style={{ fontFamily: 'var(--app-font-mono)', fontSize: '7px', letterSpacing: '0.15em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.2)', fontWeight: 700 }}>TODAY</span>
+      </div>
     );
   }
 
-  return null;
+  // Default VS
+  return (
+    <span style={{ fontFamily: 'var(--app-font-display)', fontWeight: 900, fontSize: '10px', letterSpacing: '0.12em', color: 'rgba(255,255,255,0.1)', textTransform: 'uppercase' }}>VS</span>
+  );
 }
 
 /* ── Main component ─────────────────────────────────────────────────── */
-export function FightRow({ fight: rawFight, eventDate }: { fight: FightCard; eventDate?: string }) {
+export function FightRow({ fight: rawFight, eventDate, fightIndex = 0 }: {
+  fight: FightCard; eventDate?: string; fightIndex?: number;
+}) {
   const fight = rawFight as ExtendedFightCard;
   const isCompleted = fight.pickResult === 'win' || fight.pickResult === 'loss';
 
@@ -274,7 +307,8 @@ export function FightRow({ fight: rawFight, eventDate }: { fight: FightCard; eve
 
   const analysis  = rawAnalysis as RichAnalysis | undefined;
   const pick      = analysis?.lean?.fighter;
-  const isPickA   = pick === fight.fighterA.name;
+  // Use fuzzy match — AI may return accented/apostrophe variant of the name
+  const isPickA   = pick ? sameFighter(pick, fight.fighterA.name) : false;
   const sid = (s: string) => `${fight.id}-${s}`;
   const scrollTo = (s: string) => document.getElementById(sid(s))?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   const cycleOdds = () => setOddsFormat(f => f === 'american' ? 'decimal' : f === 'decimal' ? 'probability' : 'american');
@@ -303,10 +337,9 @@ export function FightRow({ fight: rawFight, eventDate }: { fight: FightCard; eve
           letterSpacing: '0.2em', textTransform: 'uppercase', fontWeight: 700,
           color: fight.isMain ? GOLD : 'rgba(255,255,255,0.2)',
         }}>
-          {fight.isMain ? '★ MAIN EVENT' : fight.weightClass || 'BOUT'}
+          {fight.isMain ? '★ MAIN EVENT' : fight.weightClass || 'MMA'}
         </span>
-        <div className="flex items-center gap-2.5">
-          <FightStatusBadge eventDate={eventDate} isMain={fight.isMain ?? false} />
+        <div className="flex items-center gap-2">
           {isLoading && (
             <span className="flex items-center gap-1 animate-pulse" style={{ fontFamily: 'var(--app-font-mono)', fontSize: '8px', letterSpacing: '0.1em', textTransform: 'uppercase', color: RED }}>
               <Loader2 className="w-2.5 h-2.5 animate-spin" /> Scouting
@@ -355,24 +388,24 @@ export function FightRow({ fight: rawFight, eventDate }: { fight: FightCard; eve
                   ? (isPickA ? '#FAFAFA' : 'rgba(255,255,255,0.4)')
                   : '#FAFAFA',
               }}>{fight.fighterA.name}</p>
-              <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+              <div className="flex items-center gap-2 mt-0.5">
                 {fight.oddsA && (
                   <span style={{ fontFamily: 'var(--app-font-mono)', fontWeight: 700, fontSize: '12px', color: pick && isPickA ? GOLD : oddsColorA }}>
                     {formatOdds(fight.oddsA)}
                   </span>
                 )}
                 {analysis?.fighterA.style && (
-                  <span style={{ fontFamily: 'var(--app-font-mono)', fontSize: '8px', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.2)', textTransform: 'uppercase' }}>
-                    {analysis.fighterA.style.split('|')[0]?.trim()}
+                  <span style={{ fontFamily: 'var(--app-font-mono)', fontSize: '8px', letterSpacing: '0.06em', color: 'rgba(255,255,255,0.2)', textTransform: 'uppercase' }}>
+                    {briefStyle(analysis.fighterA.style)}
                   </span>
                 )}
               </div>
             </div>
           </div>
 
-          {/* VS divider */}
-          <div className="shrink-0 flex flex-col items-center justify-center gap-1 w-9">
-            <span style={{ fontFamily: 'var(--app-font-display)', fontWeight: 900, fontSize: '10px', letterSpacing: '0.1em', color: 'rgba(255,255,255,0.1)', textTransform: 'uppercase' }}>VS</span>
+          {/* Center: LIVE / countdown (replaces VS) */}
+          <div className="shrink-0 flex flex-col items-center justify-center w-16">
+            <FightCenterStatus eventDate={eventDate} isMain={fight.isMain ?? false} fightIndex={fightIndex} />
           </div>
 
           {/* Fighter B */}
@@ -386,10 +419,10 @@ export function FightRow({ fight: rawFight, eventDate }: { fight: FightCard; eve
                   ? (!isPickA ? '#FAFAFA' : 'rgba(255,255,255,0.4)')
                   : '#FAFAFA',
               }}>{fight.fighterB.name}</p>
-              <div className="flex items-center justify-end gap-2 mt-0.5 flex-wrap">
+              <div className="flex items-center justify-end gap-2 mt-0.5">
                 {analysis?.fighterB.style && (
-                  <span style={{ fontFamily: 'var(--app-font-mono)', fontSize: '8px', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.2)', textTransform: 'uppercase' }}>
-                    {analysis.fighterB.style.split('|')[0]?.trim()}
+                  <span style={{ fontFamily: 'var(--app-font-mono)', fontSize: '8px', letterSpacing: '0.06em', color: 'rgba(255,255,255,0.2)', textTransform: 'uppercase' }}>
+                    {briefStyle(analysis.fighterB.style)}
                   </span>
                 )}
                 {fight.oddsB && (
