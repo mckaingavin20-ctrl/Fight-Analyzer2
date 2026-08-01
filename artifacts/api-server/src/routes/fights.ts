@@ -2,7 +2,7 @@ import { Router } from "express";
 import fs from "node:fs";
 import path from "node:path";
 import { fetchAllOddsFights, decimalToAmerican } from "../lib/odds.js";
-import { generateDeepAnalysis, readDiskCache } from "../lib/ai-analyzer.js";
+import { generateDeepAnalysis, readDiskCache, readDiskCacheForce } from "../lib/ai-analyzer.js";
 import type { DeepAnalysis } from "../lib/ai-analyzer.js";
 import { logger } from "../lib/logger.js";
 
@@ -82,7 +82,7 @@ router.get("/fights/:fightId/analysis", async (req, res) => {
 
   // ── ESPN-only fights: name-based ID (espn_NameA~~NameB) ──────────────
   if (fightId.startsWith("espn_")) {
-    // Serve from cache first
+    // Serve from cache first — use TTL-aware read so stale caches trigger regeneration
     const cached = readDiskCache(fightId);
     if (cached) {
       logger.info({ fightId }, "ESPN fight: serving disk cache");
@@ -118,10 +118,12 @@ router.get("/fights/:fightId/analysis", async (req, res) => {
   const fight = allFights.find(f => f.id === fightId);
 
   if (!fight) {
-    // Completed fight — serve from disk cache
-    const cached = readDiskCache(fightId);
+    // Fight not in odds feed (event started or fight removed) — serve from disk cache.
+    // Use force-read (bypass TTL) so we never 404 a completed pick.
+    // If the version is stale we still serve the old data — better than a blank card.
+    const cached = readDiskCacheForce(fightId);
     if (!cached) return res.status(404).json({ error: `Fight ${fightId} not found` });
-    logger.info({ fightId }, "Completed fight: serving disk cache");
+    logger.info({ fightId }, "Completed fight: serving disk cache (TTL bypassed)");
     return res.json(buildAnalysisResponse(fightId, null, cached));
   }
 

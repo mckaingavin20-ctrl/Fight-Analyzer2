@@ -37,8 +37,10 @@ Loaded via Google Fonts in `index.css`. CSS variable `--app-font-display` is set
 - Schedule tab: Compact date blocks (red when odds live), hard-border row items
 
 ## Analysis Cache
-- TTL changed from 7 days → 48 hours for non-resolved fights (auto re-runs with fresh fighter data)
+- TTL: 48h for upcoming fights (live in odds feed) — auto re-runs with fresh fighter data
+- Completed fights (no longer in odds feed) bypass TTL — always served from cache (`readDiskCacheForce`)
+- **Cache versioning**: `CACHE_VERSION = "v4"` embedded as `_v` in every cache envelope. Bump the version to force all old caches to regenerate with the new prompt. Legacy caches (no `_v`) are: expired for upcoming fights, served as-is for completed fights.
 - `DELETE /api/fights/:fightId/analysis` endpoint clears cache for a specific fight
 - Refresh button (↺) on each fight card in the UI calls this endpoint and invalidates React Query cache
 
-**Why:** Future fights were never re-analyzed after initial generation because the 7-day TTL was too long. Now they re-run every 48h and users can force-refresh manually.
+**Why:** 48h TTL was right for upcoming fights but caused 404s for completed fights whose odds had left the feed. Force-read bypasses TTL without losing historical picks. Cache versioning auto-invalidates all servers (dev + prod) when the prompt changes — previously required manual cache clears.

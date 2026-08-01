@@ -20,6 +20,10 @@ import path from "node:path";
 // ── Model config (item 1: configurable via env var) ───────────────────
 const AI_MODEL = process.env["AI_MODEL"] ?? "gpt-5.6-terra";
 
+// ── Cache version — bump this whenever the prompt or data processing changes ──
+// All existing caches without this version tag will be treated as expired and regenerated.
+const CACHE_VERSION = "v4"; // bumped: common opponents, streak, layoff, line movement, camp quality, isMainEvent
+
 // ── Types ─────────────────────────────────────────────────────────────
 export interface DeepAnalysis {
   fighter: string;
@@ -75,22 +79,53 @@ function getCachePath(fightId: string): string {
   return path.join(CACHE_DIR, `${fightId}.json`);
 }
 
-export function readDiskCache(fightId: string): DeepAnalysis | null {
+interface CacheEnvelope {
+  _v: string;          // cache version — must match CACHE_VERSION
+  data: DeepAnalysis;
+}
+
+function readCacheFile(fightId: string, ignoreTTL: boolean): DeepAnalysis | null {
   try {
     const p = getCachePath(fightId);
     if (!fs.existsSync(p)) return null;
-    const ageHours = (Date.now() - fs.statSync(p).mtimeMs) / 3_600_000;
-    if (ageHours > 48) return null; // 48h TTL — re-run with fresh fighter data every 2 days
-    return JSON.parse(fs.readFileSync(p, "utf8")) as DeepAnalysis;
+
+    if (!ignoreTTL) {
+      const ageHours = (Date.now() - fs.statSync(p).mtimeMs) / 3_600_000;
+      if (ageHours > 48) return null; // 48h TTL — re-run with fresh fighter data every 2 days
+    }
+
+    const raw = JSON.parse(fs.readFileSync(p, "utf8")) as Record<string, unknown>;
+
+    // Version check applies only when TTL is enforced (upcoming fights).
+    // Completed fights (ignoreTTL=true) always serve whatever is cached — better
+    // than a 404 for a pick that already happened.
+    if (!ignoreTTL && raw._v !== CACHE_VERSION) return null;
+
+    // New envelope format: { _v: "vN", data: DeepAnalysis }
+    if (raw._v && raw.data) return (raw as CacheEnvelope).data;
+
+    // Legacy format (pre-envelope): raw DeepAnalysis object
+    return raw as unknown as DeepAnalysis;
   } catch {
     return null;
   }
 }
 
+/** Read cache with TTL (48h). Used for upcoming/live fights — returns null if stale. */
+export function readDiskCache(fightId: string): DeepAnalysis | null {
+  return readCacheFile(fightId, false);
+}
+
+/** Read cache ignoring TTL. Used for completed fights (odds gone) — never 404 a resolved pick. */
+export function readDiskCacheForce(fightId: string): DeepAnalysis | null {
+  return readCacheFile(fightId, true);
+}
+
 export function writeDiskCache(fightId: string, data: DeepAnalysis): void {
   try {
     if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
-    fs.writeFileSync(getCachePath(fightId), JSON.stringify(data), "utf8");
+    const envelope: CacheEnvelope = { _v: CACHE_VERSION, data };
+    fs.writeFileSync(getCachePath(fightId), JSON.stringify(envelope), "utf8");
   } catch (err) {
     logger.warn({ err }, "Failed to write disk cache");
   }
@@ -457,8 +492,21 @@ function buildPrompt(
 
   // If NEITHER Sherdog NOR UFCStats is available, tell AI to rely on training knowledge
   const noStructuredData = !sherdogA && !sherdogB && !ufcStatsA && !ufcStatsB;
+  const partialData = !noStructuredData && (!sherdogA || !sherdogB || !ufcStatsA || !ufcStatsB);
+  const missingA = !sherdogA && !ufcStatsA;
+  const missingB = !sherdogB && !ufcStatsB;
+
   const trainingKnowledgeNote = noStructuredData
-    ? `\n⚠ NOTE: No structured database records retrieved for this matchup. Use your training knowledge about these fighters — their records, style, recent fights, and known tendencies. Be explicit that this analysis is based on AI training knowledge rather than real-time database lookup.\n`
+    ? `\n⚠ DATA COVERAGE: No structured database records retrieved for either fighter. This happens for newer/regional UFC fighters not yet indexed on Sherdog or UFCStats.
+USE YOUR TRAINING KNOWLEDGE — you have been trained on MMA data and likely know these fighters from UFC coverage, MMA news, and fight results:
+- Recall their professional record, weight class, nationality, and gym affiliation
+- Recall their fighting style (striker/wrestler/grappler/MMA hybrid)
+- Recall their most significant wins and losses, and HOW they won/lost
+- Recall their recent fight history and current trajectory
+- If you genuinely have no knowledge of a fighter, say so explicitly — do not fabricate opponents or records
+Even without database stats, make a reasoned pick based on what you know. A pick based on training knowledge is better than no pick.\n`
+    : partialData
+    ? `\n⚠ PARTIAL DATA: Structured records found for ${!missingA ? fighterA : fighterB} but NOT for ${missingA ? fighterA : fighterB}. For the missing fighter, use your training knowledge — recall their record, style, gym, and significant fights. Fill the gaps intelligently.\n`
     : "";
 
   const dataBlock = [
