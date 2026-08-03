@@ -80,12 +80,14 @@ router.get("/fights/:fightId/analysis", async (req, res) => {
   const rawId = req.params.fightId;
   const fightId = decodeURIComponent(rawId);
 
+  const isMain = req.query.main === "1";
+
   // ── ESPN-only fights: name-based ID (espn_NameA~~NameB) ──────────────
   if (fightId.startsWith("espn_")) {
     // Serve from cache first — use TTL-aware read so stale caches trigger regeneration
-    const cached = readDiskCache(fightId);
+    const cached = readDiskCache(fightId, isMain);
     if (cached) {
-      logger.info({ fightId }, "ESPN fight: serving disk cache");
+      logger.info({ fightId, isMain }, "ESPN fight: serving disk cache");
       return res.json(buildAnalysisResponse(fightId, null, cached));
     }
 
@@ -97,15 +99,16 @@ router.get("/fights/:fightId/analysis", async (req, res) => {
     const nameB = namesPart.slice(tilde + 2);
     if (!nameA || !nameB) return res.status(400).json({ error: "Could not parse fighter names" });
 
-    logger.info({ fightId, nameA, nameB }, "ESPN-only fight: generating analysis without odds");
+    logger.info({ fightId, nameA, nameB, isMain }, "ESPN-only fight: generating analysis without odds");
 
-    if (!inFlight.has(fightId)) {
-      const synth = { id: fightId, commenceTime: new Date().toISOString(), fighterA: nameA, fighterB: nameB, oddsA: null as number | null, oddsB: null as number | null, book: "N/A" };
-      const promise = generateDeepAnalysis(synth, "MMA").finally(() => inFlight.delete(fightId));
-      inFlight.set(fightId, promise);
+    const espnInflightKey = `${fightId}:${isMain ? "main" : "prelim"}`;
+    if (!inFlight.has(espnInflightKey)) {
+      const synth = { id: fightId, commenceTime: new Date().toISOString(), fighterA: nameA, fighterB: nameB, oddsA: null as number | null, oddsB: null as number | null, book: "N/A", isMainEvent: isMain };
+      const promise = generateDeepAnalysis(synth, "MMA").finally(() => inFlight.delete(espnInflightKey));
+      inFlight.set(espnInflightKey, promise);
     }
     try {
-      const analysis = await inFlight.get(fightId)! as DeepAnalysis;
+      const analysis = await inFlight.get(espnInflightKey)! as DeepAnalysis;
       return res.json(buildAnalysisResponse(fightId, null, analysis));
     } catch (err) {
       logger.error({ err, fightId }, "ESPN fight analysis failed");
@@ -120,24 +123,25 @@ router.get("/fights/:fightId/analysis", async (req, res) => {
   if (!fight) {
     // Fight not in odds feed (event started or fight removed) — serve from disk cache.
     // Use force-read (bypass TTL) so we never 404 a completed pick.
-    // If the version is stale we still serve the old data — better than a blank card.
-    const cached = readDiskCacheForce(fightId);
+    // Try main variant first if isMain, then fall back to base cache.
+    const cached = readDiskCacheForce(fightId, isMain) ?? readDiskCacheForce(fightId, false);
     if (!cached) return res.status(404).json({ error: `Fight ${fightId} not found` });
-    logger.info({ fightId }, "Completed fight: serving disk cache (TTL bypassed)");
+    logger.info({ fightId, isMain }, "Completed fight: serving disk cache (TTL bypassed)");
     return res.json(buildAnalysisResponse(fightId, null, cached));
   }
 
   // Attach isMainEvent flag if front-end passes ?main=1
-  const fightWithMeta = { ...fight, isMainEvent: req.query.main === "1" };
+  const fightWithMeta = { ...fight, isMainEvent: isMain };
 
-  // Deduplicate concurrent requests
-  if (!inFlight.has(fightId)) {
-    const promise = generateDeepAnalysis(fightWithMeta, "MMA").finally(() => inFlight.delete(fightId));
-    inFlight.set(fightId, promise);
+  // Deduplicate concurrent requests — key includes isMain so main/prelim don't share a promise
+  const inflightKey = `${fightId}:${isMain ? "main" : "prelim"}`;
+  if (!inFlight.has(inflightKey)) {
+    const promise = generateDeepAnalysis(fightWithMeta, "MMA").finally(() => inFlight.delete(inflightKey));
+    inFlight.set(inflightKey, promise);
   }
 
   try {
-    const analysis = await inFlight.get(fightId)! as DeepAnalysis;
+    const analysis = await inFlight.get(inflightKey)! as DeepAnalysis;
     return res.json(buildAnalysisResponse(fightId, fight, analysis));
   } catch (err) {
     logger.error({ err, fightId }, "AI analysis failed");

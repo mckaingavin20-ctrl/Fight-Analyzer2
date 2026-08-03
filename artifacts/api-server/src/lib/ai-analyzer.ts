@@ -75,8 +75,9 @@ const CACHE_DIR = path.resolve(
   "../.cache/analysis"   // dist/../.cache → artifacts/api-server/.cache/analysis
 );
 
-function getCachePath(fightId: string): string {
-  return path.join(CACHE_DIR, `${fightId}.json`);
+function getCachePath(fightId: string, isMain = false): string {
+  const suffix = isMain ? "_main" : "";
+  return path.join(CACHE_DIR, `${fightId}${suffix}.json`);
 }
 
 interface CacheEnvelope {
@@ -84,9 +85,9 @@ interface CacheEnvelope {
   data: DeepAnalysis;
 }
 
-function readCacheFile(fightId: string, ignoreTTL: boolean): DeepAnalysis | null {
+function readCacheFile(fightId: string, ignoreTTL: boolean, isMain = false): DeepAnalysis | null {
   try {
-    const p = getCachePath(fightId);
+    const p = getCachePath(fightId, isMain);
     if (!fs.existsSync(p)) return null;
 
     if (!ignoreTTL) {
@@ -112,20 +113,20 @@ function readCacheFile(fightId: string, ignoreTTL: boolean): DeepAnalysis | null
 }
 
 /** Read cache with TTL (48h). Used for upcoming/live fights — returns null if stale. */
-export function readDiskCache(fightId: string): DeepAnalysis | null {
-  return readCacheFile(fightId, false);
+export function readDiskCache(fightId: string, isMain = false): DeepAnalysis | null {
+  return readCacheFile(fightId, false, isMain);
 }
 
 /** Read cache ignoring TTL. Used for completed fights (odds gone) — never 404 a resolved pick. */
-export function readDiskCacheForce(fightId: string): DeepAnalysis | null {
-  return readCacheFile(fightId, true);
+export function readDiskCacheForce(fightId: string, isMain = false): DeepAnalysis | null {
+  return readCacheFile(fightId, true, isMain);
 }
 
-export function writeDiskCache(fightId: string, data: DeepAnalysis): void {
+export function writeDiskCache(fightId: string, data: DeepAnalysis, isMain = false): void {
   try {
     if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
     const envelope: CacheEnvelope = { _v: CACHE_VERSION, data };
-    fs.writeFileSync(getCachePath(fightId), JSON.stringify(envelope), "utf8");
+    fs.writeFileSync(getCachePath(fightId, isMain), JSON.stringify(envelope), "utf8");
   } catch (err) {
     logger.warn({ err }, "Failed to write disk cache");
   }
@@ -833,7 +834,7 @@ async function callAI(fight: OddsFight, weightClass: string): Promise<DeepAnalys
     if (form.length > 0) parsed.fighterBProfile.recentForm = form;
   }
 
-  writeDiskCache(fight.id, parsed);
+  writeDiskCache(fight.id, parsed, isMainEvent);
 
   // Record this pick in the tracker (no-op if already recorded)
   recordPick(
@@ -862,15 +863,18 @@ export async function generateDeepAnalysis(
   fight: OddsFight,
   weightClass: string
 ): Promise<DeepAnalysis> {
-  const cached = readDiskCache(fight.id);
+  const isMain: boolean = (fight as any).isMainEvent === true;
+  const inflightKey = `${fight.id}:${isMain ? "main" : "prelim"}`;
+
+  const cached = readDiskCache(fight.id, isMain);
   if (cached) {
-    logger.info({ fightId: fight.id }, "Returning disk-cached analysis");
+    logger.info({ fightId: fight.id, isMain }, "Returning disk-cached analysis");
     return cached;
   }
 
-  const existing = inFlight.get(fight.id);
+  const existing = inFlight.get(inflightKey);
   if (existing) {
-    logger.info({ fightId: fight.id }, "Joining in-flight analysis request");
+    logger.info({ fightId: fight.id, isMain }, "Joining in-flight analysis request");
     return existing;
   }
 
@@ -880,10 +884,10 @@ export async function generateDeepAnalysis(
       return oddsFallback(fight);
     })
     .finally(() => {
-      inFlight.delete(fight.id);
+      inFlight.delete(inflightKey);
     });
 
-  inFlight.set(fight.id, promise);
+  inFlight.set(inflightKey, promise);
   return promise;
 }
 
