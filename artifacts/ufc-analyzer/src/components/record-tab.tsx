@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { CheckCircle2, XCircle, Clock } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { PicksRecord } from '@workspace/api-client-react/src/generated/api.schemas';
+import type { PicksRecord } from '@workspace/api-client-react';
 
 const RED        = '#E11D48';
 const GOLD       = '#F59E0B';
@@ -56,7 +56,7 @@ export function RecordTab({ record }: { record: PicksRecord | undefined }) {
             Gavin's Picks™ — Season Record
           </span>
         </div>
-        <div className="grid grid-cols-3 divide-x" style={{ background: '#111113', divideColor: 'rgba(255,255,255,0.06)' }}>
+        <div className="grid grid-cols-3 divide-x" style={{ background: '#111113' }}>
           <ScoreBlock label="Wins" value={wins} color={WIN_COLOR} />
           <ScoreBlock label="Losses" value={losses} color={LOSS_COLOR} />
           <ScoreBlock

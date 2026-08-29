@@ -103,7 +103,7 @@ function readCacheFile(fightId: string, ignoreTTL: boolean, isMain = false): Dee
     if (!ignoreTTL && raw._v !== CACHE_VERSION) return null;
 
     // New envelope format: { _v: "vN", data: DeepAnalysis }
-    if (raw._v && raw.data) return (raw as CacheEnvelope).data;
+    if (raw._v && raw.data) return (raw as unknown as CacheEnvelope).data;
 
     // Legacy format (pre-envelope): raw DeepAnalysis object
     return raw as unknown as DeepAnalysis;
@@ -327,7 +327,7 @@ function computeMatchupMetrics(
   // ── Stance matchup ────────────────────────────────────────────────────
   const stanceA = statsA?.stance?.toLowerCase() ?? "";
   const stanceB = statsB?.stance?.toLowerCase() ?? "";
-  if (stanceA && stanceB) {
+  if (statsA && statsB && stanceA && stanceB) {
     const aOrtho = stanceA.includes("orthodox");
     const bOrtho = stanceB.includes("orthodox");
     const aSouth = stanceA.includes("southpaw");

@@ -326,7 +326,7 @@ export async function scrapeFighterStats(fighterId: string): Promise<FighterFull
     $(".b-fight-details__table-row").each((i, row) => {
       if (i >= 5) return false; // stop after 5 fights
       const cells = $(row).find("td");
-      if (cells.length < 2) return;
+      if (cells.length < 2) return true;
       const result = $(cells[0]).text().trim().toUpperCase();
       const oppName = $(cells[1]).find("a").text().trim();
       const method = $(cells[7]).text().trim();
@@ -334,6 +334,7 @@ export async function scrapeFighterStats(fighterId: string): Promise<FighterFull
         recentForm.push(`${result} (${method || "?"})`);
         opponents.push(oppName.toLowerCase());
       }
+      return true;
     });
 
     const statsObj = { slpm, strAcc, strDef, tdAvg, tdAcc, tdDef, subAvg, recentForm, opponents };
