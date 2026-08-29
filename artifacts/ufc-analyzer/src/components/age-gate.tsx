@@ -60,9 +60,9 @@ export function AgeGate({ children }: { children: React.ReactNode }) {
           </p>
 
           <div className="bg-[#0a0a18] border border-white/5 rounded-lg px-4 py-3 mb-6 text-xs text-gray-400 leading-relaxed">
-            This site contains sports analysis and pick recommendations. You must be{' '}
+            This site contains sports analysis. You must be{' '}
             <span className="text-white font-semibold">18 years or older</span> to enter.
-            Please gamble responsibly.
+            Please use the information for education only.
           </div>
 
           <button
@@ -70,7 +70,7 @@ export function AgeGate({ children }: { children: React.ReactNode }) {
             className="w-full py-3.5 rounded-xl font-black uppercase tracking-widest text-sm text-black transition-all duration-150 hover:brightness-110 active:scale-[0.98]"
             style={{ background: 'linear-gradient(135deg, #00e664, #00c853)' }}
           >
-            I'm 18 or Older — Enter
+            I'm 18 or Older, Enter
           </button>
 
           <button
@@ -82,7 +82,7 @@ export function AgeGate({ children }: { children: React.ReactNode }) {
         </div>
 
         <p className="text-center text-[10px] text-gray-700 font-mono mt-4 px-4">
-          Gavin's Picks is for entertainment only. Never bet more than you can afford to lose.
+          UFC Analyzer is for education and reference only.
         </p>
       </div>
     </div>

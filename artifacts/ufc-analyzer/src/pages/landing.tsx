@@ -73,7 +73,7 @@ export default function Landing() {
             <div className="flex flex-col sm:flex-row items-start sm:items-end gap-8 sm:gap-16">
               <p className="max-w-sm text-sm leading-relaxed" style={{ color: 'rgba(250,250,250,0.5)', fontFamily: 'var(--app-font-sans)' }}>
                 Deep AI scouting on every UFC fight. Physical matchup analysis,
-                fighter tape review, and locked‑in picks — with a live W‑L record you can bet against.
+                fighter-data diagnostics, and evidence-based educational context.
               </p>
               <div className="flex flex-col sm:flex-row gap-3 shrink-0">
                 <button onClick={() => setLocation('/sign-up')}
@@ -93,7 +93,7 @@ export default function Landing() {
             <div className="mt-16 grid grid-cols-3 gap-0 max-w-lg">
               {[
                 { val: '7W–6L', label: 'Live Record', sub: 'fully auditable' },
-                { val: '15', label: 'Data Sources', sub: 'per fight' },
+                { val: '3', label: 'Data Layers', sub: 'per fight' },
                 { val: '9-pt', label: 'Scout Report', sub: 'depth' },
               ].map((s, i) => (
                 <div key={i} className="py-4 pr-8 border-r last:border-r-0" style={{ borderColor: 'rgba(255,255,255,0.07)' }}>
@@ -151,8 +151,8 @@ export default function Landing() {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-10 sm:gap-16">
               {[
-                { n: '01', title: 'Pick an Event', desc: 'Browse the upcoming UFC card. We pull live fight data, betting lines, and fighter records from multiple sources.' },
-                { n: '02', title: 'AI Runs the Analysis', desc: 'Our system scrapes Sherdog, UFCStats, Tapology, and 10 more sources, then GPT cross-references tape to build a full scout report.' },
+                { n: '01', title: 'Choose a UFC event', desc: 'Browse numbered UFC cards, Fight Nights, and Noche events with complete returned bouts, including prelims.' },
+                { n: '02', title: 'Review the evidence', desc: 'Inspect fighter identity, records, source freshness, and the limits of the available evidence before reading the matchup context.' },
                 { n: '03', title: 'Pick is Locked', desc: 'The pick and reasoning are stored permanently. No changes after generation. Your record is real — it tracks every call.' },
               ].map((s, i) => (
                 <div key={i} className="flex gap-5">

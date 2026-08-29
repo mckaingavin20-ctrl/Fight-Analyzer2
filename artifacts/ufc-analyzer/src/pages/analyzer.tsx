@@ -199,12 +199,7 @@ function CardTab({
                 <><span style={{ color: 'rgba(255,255,255,0.1)' }}>·</span>
                 <span style={{ fontFamily: 'var(--app-font-mono)', fontSize: '10px', color: 'rgba(255,255,255,0.2)' }}>{selectedEvent.location}</span></>
               )}
-              {!selectedEvent.hasOdds && (
-                <span className="px-2 py-0.5 border text-[9px] font-black uppercase"
-                  style={{ color: GOLD, borderColor: 'rgba(245,158,11,0.2)', background: 'rgba(245,158,11,0.06)', fontFamily: 'var(--app-font-mono)', letterSpacing: '0.1em' }}>
-                  Odds TBD — AI uses fighter knowledge
-                </span>
-              )}
+
             </div>
           )}
         </div>
