@@ -17,6 +17,7 @@ import path from "node:path";
 import axios from "axios";
 import * as cheerio from "cheerio";
 import { logger } from "./logger.js";
+import { normalizeFighterName, withRateLimit } from "./fighter-data.js";
 
 const BASE = "http://ufcstats.com";
 const UA =
@@ -364,7 +365,8 @@ function parseFighterDetail(html: string, url: string): UfcStatsFighterStats {
 export async function getFighterStats(
   name: string
 ): Promise<UfcStatsFighterStats | null> {
-  const cached = readFighterCache(name);
+  const normalizedName = normalizeFighterName(name);
+  const cached = readFighterCache(normalizedName);
   if (cached) {
     logger.debug({ name }, "UFCStats: returning cached fighter stats");
     return cached;
@@ -372,7 +374,7 @@ export async function getFighterStats(
 
   try {
     logger.info({ name }, "UFCStats: searching for fighter");
-    const detailUrl = await searchFighter(name);
+    const detailUrl = await withRateLimit("ufcstats", () => searchFighter(normalizedName));
     if (!detailUrl) {
       logger.warn({ name }, "UFCStats: fighter not found in index");
       return null;
@@ -380,7 +382,7 @@ export async function getFighterStats(
 
     const html = await get(detailUrl);
     const data = parseFighterDetail(html, detailUrl);
-    data.name = data.name || name;
+    data.name = data.name || normalizedName;
 
     // Validate the fetched profile is actually the right person
     const score = nameScore(name, data.name);

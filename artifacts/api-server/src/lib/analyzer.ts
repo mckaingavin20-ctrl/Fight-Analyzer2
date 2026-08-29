@@ -1,4 +1,24 @@
 import { OddsFight, decimalToAmerican, trueProbs } from "./odds.js";
+import type { UfcStatsFighterStats } from "./ufcstats.js";
+
+export function analyzeFromStats(
+  fighterA: UfcStatsFighterStats | null,
+  fighterB: UfcStatsFighterStats | null,
+): { summary: string; warnings: string[]; evidence: string[] } {
+  const warnings: string[] = [];
+  const evidence: string[] = [];
+  if (!fighterA || !fighterB) warnings.push("Verified UFCStats data is missing for one or both fighters.");
+  if (fighterA && fighterB) {
+    const aNet = fighterA.slpm !== null && fighterA.sapm !== null ? fighterA.slpm - fighterA.sapm : null;
+    const bNet = fighterB.slpm !== null && fighterB.sapm !== null ? fighterB.slpm - fighterB.sapm : null;
+    if (aNet !== null && bNet !== null) evidence.push(`Net striking differential: ${fighterA.name} ${aNet.toFixed(2)} vs ${fighterB.name} ${bNet.toFixed(2)} landed per minute.`);
+    else warnings.push("Net striking differential is unavailable because one or more source fields are missing.");
+    if (fighterA.tdDef !== null && fighterB.tdAvg !== null) evidence.push(`${fighterB.name} averages ${fighterB.tdAvg} takedowns per 15 minutes against ${fighterA.name}'s ${fighterA.tdDef}% takedown defense.`);
+    if (fighterB.tdDef !== null && fighterA.tdAvg !== null) evidence.push(`${fighterA.name} averages ${fighterA.tdAvg} takedowns per 15 minutes against ${fighterB.name}'s ${fighterB.tdDef}% takedown defense.`);
+  }
+  return { summary: evidence.length ? "Educational comparison based only on verified source fields. It is not a prediction." : "Not enough verified data for a responsible matchup comparison.", warnings, evidence };
+}
+
 
 export interface AnalysisLean {
   fighter: string;
@@ -18,10 +38,9 @@ export function analyzeFromOdds(
     return {
       fighter: fighterA,
       confidence: "toss-up",
-      reasoning:
-        "No odds data available for this fight yet. Too early for the market to price this matchup.",
+      reasoning: "Verified fighter data is unavailable. No evidence-based comparison can be made yet.",
       keyEdges: [],
-      riskFactors: ["No odds data — unable to assess market consensus"],
+      riskFactors: ["Missing verified fighter statistics"],
     };
   }
 
