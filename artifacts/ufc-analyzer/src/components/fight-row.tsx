@@ -5,7 +5,7 @@ import {
 } from 'recharts';
 import { getGetFightAnalysisQueryKey } from '@workspace/api-client-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { FightCard, FighterStats } from '@workspace/api-client-react/src/generated/api.schemas';
+import type { FightCard, FighterStats } from '@workspace/api-client-react';
 import {
   ChevronDown, AlertCircle, ShieldAlert,
   Swords, Users, Loader2, TrendingUp, CheckCircle2, RefreshCw, Zap,
@@ -314,8 +314,8 @@ export function FightRow({ fight: rawFight, eventDate, fightIndex = 0 }: {
   const cycleOdds = () => setOddsFormat(f => f === 'american' ? 'decimal' : f === 'decimal' ? 'probability' : 'american');
 
   // Odds coloring: green = favorite (lower decimal), dim = underdog
-  const oddsColorA = fight.oddsA ? (isFavorite(fight.oddsA) ? '#FAFAFA' : 'rgba(255,255,255,0.45)') : 'rgba(255,255,255,0.25)';
-  const oddsColorB = fight.oddsB ? (isFavorite(fight.oddsB) ? '#FAFAFA' : 'rgba(255,255,255,0.45)') : 'rgba(255,255,255,0.25)';
+  const oddsColorA = 'rgba(255,255,255,0.25)';
+  const oddsColorB = 'rgba(255,255,255,0.25)';
 
   return (
     <div
@@ -389,11 +389,7 @@ export function FightRow({ fight: rawFight, eventDate, fightIndex = 0 }: {
                   : '#FAFAFA',
               }}>{fight.fighterA.name}</p>
               <div className="flex items-center gap-2 mt-0.5">
-                {fight.oddsA && (
-                  <span style={{ fontFamily: 'var(--app-font-mono)', fontWeight: 700, fontSize: '12px', color: pick && isPickA ? GOLD : oddsColorA }}>
-                    {formatOdds(fight.oddsA)}
-                  </span>
-                )}
+
                 {analysis?.fighterA.style && (
                   <span style={{ fontFamily: 'var(--app-font-mono)', fontSize: '8px', letterSpacing: '0.06em', color: 'rgba(255,255,255,0.2)', textTransform: 'uppercase' }}>
                     {briefStyle(analysis.fighterA.style)}
@@ -425,11 +421,7 @@ export function FightRow({ fight: rawFight, eventDate, fightIndex = 0 }: {
                     {briefStyle(analysis.fighterB.style)}
                   </span>
                 )}
-                {fight.oddsB && (
-                  <span style={{ fontFamily: 'var(--app-font-mono)', fontWeight: 700, fontSize: '12px', color: pick && !isPickA ? GOLD : oddsColorB }}>
-                    {formatOdds(fight.oddsB)}
-                  </span>
-                )}
+
               </div>
             </div>
             <div className="relative shrink-0">

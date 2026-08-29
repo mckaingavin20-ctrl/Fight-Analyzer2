@@ -20,7 +20,7 @@ export default function Analyzer() {
   const { signOut } = useClerk();
 
   const { data: events, isLoading: isLoadingEvents } = useListEvents();
-  const { data: record } = useGetRecord({ query: { staleTime: 1000 * 60 * 2, refetchInterval: 1000 * 60 * 2 } });
+  const { data: record } = useGetRecord({ query: { queryKey: ['/api/record'], staleTime: 1000 * 60 * 2, refetchInterval: 1000 * 60 * 2 } });
 
   useEffect(() => {
     if (!events?.length || selectedEventId) return;
